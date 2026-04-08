@@ -228,6 +228,72 @@ class NavixyAPITester:
 
         return results
 
+    def test_map_positions_endpoint(self) -> Dict[str, Any]:
+        """Test /api/map/positions endpoint for GPS positions"""
+        try:
+            response = self.session.get(f"{self.api_url}/map/positions")
+            success = response.status_code == 200
+            data = response.json() if success else {}
+            
+            if success and data.get('success'):
+                positions = data.get('positions', [])
+                self.log_test("Map Positions API", True, f"Found {len(positions)} vehicle positions")
+                return {"success": True, "positions_count": len(positions), "data": data}
+            else:
+                error_msg = data.get('error', f"HTTP {response.status_code}")
+                self.log_test("Map Positions API", False, error_msg)
+                return {"success": False, "error": error_msg}
+        except Exception as e:
+            self.log_test("Map Positions API", False, str(e))
+            return {"success": False, "error": str(e)}
+
+    def test_analytics_trends_endpoint(self) -> Dict[str, Any]:
+        """Test /api/analytics/trends endpoint for weekly trends"""
+        try:
+            params = {'period': 'week'}
+            response = self.session.get(f"{self.api_url}/analytics/trends", params=params)
+            success = response.status_code == 200
+            data = response.json() if success else {}
+            
+            if success and data.get('success'):
+                trends = data.get('trends', [])
+                summary = data.get('summary', {})
+                self.log_test("Analytics Trends API", True, 
+                            f"Period: {data.get('period')}, Days: {data.get('days')}, "
+                            f"Trends data points: {len(trends)}")
+                return {"success": True, "trends_count": len(trends), "summary": summary}
+            else:
+                error_msg = data.get('error', f"HTTP {response.status_code}")
+                self.log_test("Analytics Trends API", False, error_msg)
+                return {"success": False, "error": error_msg}
+        except Exception as e:
+            self.log_test("Analytics Trends API", False, str(e))
+            return {"success": False, "error": str(e)}
+
+    def test_vehicle_comparison_endpoint(self) -> Dict[str, Any]:
+        """Test /api/analytics/vehicle-comparison endpoint"""
+        try:
+            response = self.session.get(f"{self.api_url}/analytics/vehicle-comparison")
+            success = response.status_code == 200
+            data = response.json() if success else {}
+            
+            if success and data.get('success'):
+                vehicles = data.get('vehicles', [])
+                top_performer = data.get('top_performer')
+                needs_attention = data.get('needs_attention', [])
+                self.log_test("Vehicle Comparison API", True, 
+                            f"Vehicles: {len(vehicles)}, "
+                            f"Top performer: {top_performer.get('label') if top_performer else 'None'}, "
+                            f"Need attention: {len(needs_attention)}")
+                return {"success": True, "vehicles_count": len(vehicles), "data": data}
+            else:
+                error_msg = data.get('error', f"HTTP {response.status_code}")
+                self.log_test("Vehicle Comparison API", False, error_msg)
+                return {"success": False, "error": error_msg}
+        except Exception as e:
+            self.log_test("Vehicle Comparison API", False, str(e))
+            return {"success": False, "error": str(e)}
+
     def test_export_endpoints(self) -> Dict[str, Any]:
         """Test export endpoints"""
         results = {"fleet_csv": False, "fleet_json": False, "driver_csv": False}
@@ -286,6 +352,9 @@ class NavixyAPITester:
             "fleet_stats": {},
             "fleet_efficiency": {},
             "driver_report": {},
+            "map_positions": {},
+            "analytics_trends": {},
+            "vehicle_comparison": {},
             "flows": {},
             "exports": {}
         }
@@ -297,6 +366,9 @@ class NavixyAPITester:
         test_results["fleet_stats"] = self.test_fleet_stats_endpoint()
         test_results["fleet_efficiency"] = self.test_fleet_efficiency_endpoint()
         test_results["driver_report"] = self.test_driver_report_endpoint()
+        test_results["map_positions"] = self.test_map_positions_endpoint()
+        test_results["analytics_trends"] = self.test_analytics_trends_endpoint()
+        test_results["vehicle_comparison"] = self.test_vehicle_comparison_endpoint()
         test_results["flows"] = self.test_flows_endpoints()
         test_results["exports"] = self.test_export_endpoints()
 

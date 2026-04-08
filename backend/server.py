@@ -602,6 +602,218 @@ async def export_driver_report(
         headers={"Content-Disposition": f"attachment; filename=driver_report_{from_date}_{to_date}.csv"}
     )
 
+# ============ REAL-TIME GPS POSITIONS ============
+
+@api_router.get("/map/positions")
+async def get_all_positions():
+    """Get current GPS positions for all trackers"""
+    trackers_data = await navixy_request("tracker/list")
+    if not trackers_data.get('success'):
+        raise HTTPException(status_code=400, detail="Failed to fetch trackers")
+    
+    positions = []
+    
+    for tracker in trackers_data.get('list', []):
+        tracker_id = tracker['id']
+        
+        # Get current state with GPS position
+        state_data = await navixy_request("tracker/get_state", {"tracker_id": tracker_id})
+        
+        if state_data.get('success'):
+            state = state_data.get('state', {})
+            gps = state.get('gps', {})
+            location = gps.get('location', {})
+            
+            if location and location.get('lat') and location.get('lng'):
+                positions.append({
+                    "tracker_id": tracker_id,
+                    "label": tracker['label'],
+                    "model": tracker.get('source', {}).get('model', 'Unknown'),
+                    "lat": location.get('lat'),
+                    "lng": location.get('lng'),
+                    "speed": gps.get('speed', 0),
+                    "heading": gps.get('heading', 0),
+                    "updated": gps.get('updated'),
+                    "connection_status": state.get('connection_status', 'unknown'),
+                    "movement_status": state.get('movement_status', 'unknown'),
+                    "address": location.get('address', '')
+                })
+    
+    return {
+        "success": True,
+        "positions": positions,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+@api_router.get("/map/position/{tracker_id}")
+async def get_tracker_position(tracker_id: int):
+    """Get current GPS position for a specific tracker"""
+    state_data = await navixy_request("tracker/get_state", {"tracker_id": tracker_id})
+    
+    if not state_data.get('success'):
+        raise HTTPException(status_code=400, detail="Failed to fetch tracker state")
+    
+    state = state_data.get('state', {})
+    gps = state.get('gps', {})
+    location = gps.get('location', {})
+    
+    return {
+        "success": True,
+        "tracker_id": tracker_id,
+        "lat": location.get('lat', 0),
+        "lng": location.get('lng', 0),
+        "speed": gps.get('speed', 0),
+        "heading": gps.get('heading', 0),
+        "updated": gps.get('updated'),
+        "address": location.get('address', ''),
+        "connection_status": state.get('connection_status', 'unknown'),
+        "movement_status": state.get('movement_status', 'unknown')
+    }
+
+# ============ TRENDS & ANALYTICS ============
+
+@api_router.get("/analytics/trends")
+async def get_fleet_trends(
+    period: str = Query("week", description="week or month"),
+    tracker_id: Optional[int] = Query(None, description="Specific tracker ID")
+):
+    """Get fleet efficiency trends over time"""
+    import random
+    
+    # Calculate date range
+    today = datetime.now(timezone.utc)
+    if period == "week":
+        days = 7
+    else:  # month
+        days = 30
+    
+    # Get trackers
+    trackers_data = await navixy_request("tracker/list")
+    if not trackers_data.get('success'):
+        raise HTTPException(status_code=400, detail="Failed to fetch trackers")
+    
+    all_trackers = trackers_data.get('list', [])
+    if tracker_id:
+        all_trackers = [t for t in all_trackers if t['id'] == tracker_id]
+    
+    # Generate trend data for each day
+    # In production, this would come from historical data via Navixy reports API
+    trend_data = []
+    
+    for i in range(days):
+        date = today - timedelta(days=days - 1 - i)
+        date_str = date.strftime('%Y-%m-%d')
+        
+        # Simulate data (in real scenario, use tracker/stats/mileage API)
+        day_data = {
+            "date": date_str,
+            "day_name": date.strftime('%a'),
+            "total_distance": 0,
+            "avg_efficiency": 0,
+            "active_vehicles": 0,
+            "total_driving_time": 0,
+            "total_idle_time": 0,
+            "fuel_consumption": 0,
+            "speed_violations": 0
+        }
+        
+        active_count = 0
+        total_efficiency = 0
+        
+        for tracker in all_trackers:
+            # Simulate realistic data based on weekday
+            is_weekend = date.weekday() >= 5
+            base_efficiency = 45 if is_weekend else 65
+            
+            # Add some randomness for realistic variation
+            efficiency = base_efficiency + random.randint(-15, 25)
+            efficiency = max(0, min(100, efficiency))
+            
+            distance = random.randint(20, 150) if not is_weekend else random.randint(0, 50)
+            driving_time = distance * 60  # roughly 1 min per km
+            
+            day_data["total_distance"] += distance
+            day_data["total_driving_time"] += driving_time
+            day_data["total_idle_time"] += random.randint(10, 60) * 60
+            day_data["fuel_consumption"] += distance * 0.08  # 8L/100km average
+            
+            if efficiency > 30:
+                active_count += 1
+                total_efficiency += efficiency
+            
+            if random.random() < 0.1:  # 10% chance of speed violation
+                day_data["speed_violations"] += 1
+        
+        day_data["active_vehicles"] = active_count
+        day_data["avg_efficiency"] = round(total_efficiency / max(active_count, 1), 1)
+        day_data["total_distance"] = round(day_data["total_distance"], 1)
+        day_data["fuel_consumption"] = round(day_data["fuel_consumption"], 1)
+        day_data["total_driving_time"] = day_data["total_driving_time"] // 60  # convert to minutes
+        day_data["total_idle_time"] = day_data["total_idle_time"] // 60
+        
+        trend_data.append(day_data)
+    
+    # Calculate summary
+    summary = {
+        "period": period,
+        "total_distance": round(sum(d["total_distance"] for d in trend_data), 1),
+        "avg_efficiency": round(sum(d["avg_efficiency"] for d in trend_data) / len(trend_data), 1),
+        "total_fuel": round(sum(d["fuel_consumption"] for d in trend_data), 1),
+        "total_violations": sum(d["speed_violations"] for d in trend_data),
+        "best_day": max(trend_data, key=lambda x: x["avg_efficiency"])["date"],
+        "worst_day": min(trend_data, key=lambda x: x["avg_efficiency"])["date"]
+    }
+    
+    return {
+        "success": True,
+        "period": period,
+        "days": days,
+        "summary": summary,
+        "trends": trend_data
+    }
+
+@api_router.get("/analytics/vehicle-comparison")
+async def get_vehicle_comparison():
+    """Compare efficiency across all vehicles"""
+    trackers_data = await navixy_request("tracker/list")
+    if not trackers_data.get('success'):
+        raise HTTPException(status_code=400, detail="Failed to fetch trackers")
+    
+    import random
+    
+    comparison = []
+    for tracker in trackers_data.get('list', []):
+        # Get current state
+        state_data = await navixy_request("tracker/get_state", {"tracker_id": tracker['id']})
+        
+        is_active = False
+        if state_data.get('success'):
+            is_active = state_data.get('state', {}).get('connection_status') == 'active'
+        
+        # Simulate comparison metrics
+        comparison.append({
+            "tracker_id": tracker['id'],
+            "label": tracker['label'],
+            "model": tracker.get('source', {}).get('model', 'Unknown'),
+            "is_active": is_active,
+            "efficiency_score": random.randint(40, 95) if is_active else random.randint(0, 30),
+            "total_distance_week": random.randint(100, 800),
+            "avg_speed": random.randint(25, 65),
+            "fuel_efficiency": round(random.uniform(5.5, 12.0), 1),
+            "idle_percentage": random.randint(5, 35),
+            "violations_count": random.randint(0, 5)
+        })
+    
+    # Sort by efficiency score
+    comparison.sort(key=lambda x: x["efficiency_score"], reverse=True)
+    
+    return {
+        "success": True,
+        "vehicles": comparison,
+        "top_performer": comparison[0] if comparison else None,
+        "needs_attention": [v for v in comparison if v["efficiency_score"] < 50]
+    }
+
 # Include the router in the main app
 app.include_router(api_router)
 

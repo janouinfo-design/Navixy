@@ -518,7 +518,11 @@ async def export_fleet_stats(
     format: str = Query("csv", description="csv or json")
 ):
     """Export fleet statistics as CSV or JSON"""
-    stats = await get_fleet_stats(from_date, to_date)
+    try:
+        stats = await get_fleet_stats(from_date, to_date, None)
+    except Exception as e:
+        logger.error(f"Error getting fleet stats for export: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch fleet stats: {str(e)}")
     
     if format == "json":
         json_content = json.dumps(stats, indent=2, default=str)

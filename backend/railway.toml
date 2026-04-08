@@ -1,0 +1,12 @@
+[build]
+builder = "nixpacks"
+buildCommand = "pip install -r requirements.txt"
+
+[deploy]
+startCommand = "uvicorn server:app --host 0.0.0.0 --port ${PORT:-8000}"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+
+[variables]
+NAVIXY_HASH = "a25480874b7492bd01ff1d926061e491"
+NAVIXY_API_URL = "https://api.navixy.com/v2"

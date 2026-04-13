@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Query
+from fastapi import FastAPI, APIRouter, HTTPException, Query, Request, Header, Depends
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -14,6 +14,7 @@ import httpx
 import json
 import io
 import csv
+import re
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -24,12 +25,13 @@ db_name = os.environ.get('DB_NAME', 'navixy_dashboard')
 client = AsyncIOMotorClient(mongo_url)
 db = client[db_name]
 
-# Navixy configuration
-NAVIXY_HASH = os.environ.get('NAVIXY_HASH', '')
+# Navixy configuration - Default hash (fallback)
+DEFAULT_NAVIXY_HASH = os.environ.get('NAVIXY_HASH', '')
 NAVIXY_API_URL = os.environ.get('NAVIXY_API_URL', 'https://api.navixy.com/v2')
+BASE_DOMAIN = os.environ.get('BASE_DOMAIN', 'logitrak.ch')
 
 # Create the main app
-app = FastAPI(title="Navixy Fleet Dashboard")
+app = FastAPI(title="Navixy Fleet Dashboard - Multi-Client")
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
@@ -40,6 +42,41 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# ============ MULTI-CLIENT SYSTEM ============
+
+async def get_client_from_subdomain(request: Request) -> Optional[dict]:
+    """Extract client info from subdomain"""
+    host = request.headers.get('host', '')
+    
+    # Extract subdomain: hermus.logitrak.ch -> hermus
+    match = re.match(r'^([a-zA-Z0-9-]+)\.' + re.escape(BASE_DOMAIN), host)
+    
+    if match:
+        subdomain = match.group(1).lower()
+        # Skip www and admin
+        if subdomain in ['www', 'admin', 'api']:
+            return None
+        
+        # Look up client in database
+        client_info = await db.clients.find_one({"subdomain": subdomain, "is_active": True}, {"_id": 0})
+        return client_info
+    
+    return None
+
+async def get_navixy_hash(request: Request, x_client_hash: Optional[str] = Header(None)) -> str:
+    """Get Navixy hash from client subdomain or header"""
+    # Priority 1: Header (for testing)
+    if x_client_hash:
+        return x_client_hash
+    
+    # Priority 2: Subdomain-based client
+    client_info = await get_client_from_subdomain(request)
+    if client_info and client_info.get('navixy_hash'):
+        return client_info['navixy_hash']
+    
+    # Priority 3: Default hash
+    return DEFAULT_NAVIXY_HASH
 
 # ============ MODELS ============
 
@@ -94,17 +131,47 @@ class FlowCreate(BaseModel):
     nodes: List[Dict[str, Any]] = []
     connections: List[Dict[str, Any]] = []
 
+# ============ CLIENT MANAGEMENT MODELS ============
+
+class ClientCreate(BaseModel):
+    name: str
+    subdomain: str
+    navixy_hash: str
+    logo_url: Optional[str] = None
+    primary_color: Optional[str] = "#e53935"
+    contact_email: Optional[str] = None
+
+class ClientUpdate(BaseModel):
+    name: Optional[str] = None
+    navixy_hash: Optional[str] = None
+    logo_url: Optional[str] = None
+    primary_color: Optional[str] = None
+    contact_email: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class Client(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    subdomain: str
+    navixy_hash: str
+    logo_url: Optional[str] = None
+    primary_color: str = "#e53935"
+    contact_email: Optional[str] = None
+    is_active: bool = True
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
 # ============ NAVIXY API HELPERS ============
 
-async def navixy_request(endpoint: str, params: dict = None) -> dict:
-    """Make a request to Navixy API"""
+async def navixy_request(endpoint: str, params: dict = None, navixy_hash: str = None) -> dict:
+    """Make a request to Navixy API with dynamic hash"""
     if params is None:
         params = {}
-    params['hash'] = NAVIXY_HASH
+    params['hash'] = navixy_hash or DEFAULT_NAVIXY_HASH
     
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=30.0) as http_client:
         try:
-            response = await client.post(
+            response = await http_client.post(
                 f"{NAVIXY_API_URL}/{endpoint}",
                 json=params
             )
@@ -116,11 +183,101 @@ async def navixy_request(endpoint: str, params: dict = None) -> dict:
             logger.error(f"Navixy request failed: {e}")
             return {"success": False, "error": str(e)}
 
+# ============ CLIENT MANAGEMENT ROUTES (ADMIN) ============
+
+@api_router.get("/admin/clients")
+async def list_clients():
+    """List all clients (Admin only)"""
+    clients = await db.clients.find({}, {"_id": 0}).to_list(1000)
+    for c in clients:
+        if isinstance(c.get('created_at'), str):
+            c['created_at'] = datetime.fromisoformat(c['created_at'])
+    return {"success": True, "clients": clients}
+
+@api_router.post("/admin/clients")
+async def create_client(client_input: ClientCreate):
+    """Create a new client"""
+    # Check if subdomain already exists
+    existing = await db.clients.find_one({"subdomain": client_input.subdomain.lower()})
+    if existing:
+        raise HTTPException(status_code=400, detail="Subdomain already exists")
+    
+    # Create client
+    client_obj = Client(
+        name=client_input.name,
+        subdomain=client_input.subdomain.lower(),
+        navixy_hash=client_input.navixy_hash,
+        logo_url=client_input.logo_url,
+        primary_color=client_input.primary_color or "#e53935",
+        contact_email=client_input.contact_email
+    )
+    
+    doc = client_obj.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    
+    await db.clients.insert_one(doc)
+    
+    return {
+        "success": True, 
+        "client": client_obj.model_dump(),
+        "dashboard_url": f"https://{client_obj.subdomain}.{BASE_DOMAIN}"
+    }
+
+@api_router.get("/admin/clients/{client_id}")
+async def get_client(client_id: str):
+    """Get client details"""
+    client_doc = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not client_doc:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return {"success": True, "client": client_doc}
+
+@api_router.put("/admin/clients/{client_id}")
+async def update_client(client_id: str, client_input: ClientUpdate):
+    """Update client"""
+    update_data = {k: v for k, v in client_input.model_dump().items() if v is not None}
+    
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No data to update")
+    
+    result = await db.clients.update_one(
+        {"id": client_id},
+        {"$set": update_data}
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Client not found")
+    
+    return {"success": True, "message": "Client updated"}
+
+@api_router.delete("/admin/clients/{client_id}")
+async def delete_client(client_id: str):
+    """Delete client"""
+    result = await db.clients.delete_one({"id": client_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return {"success": True, "message": "Client deleted"}
+
+@api_router.get("/client/info")
+async def get_client_info(request: Request):
+    """Get current client info based on subdomain"""
+    client_info = await get_client_from_subdomain(request)
+    
+    if client_info:
+        # Don't expose the hash
+        safe_info = {k: v for k, v in client_info.items() if k != 'navixy_hash'}
+        return {"success": True, "client": safe_info, "is_multi_tenant": True}
+    
+    return {
+        "success": True, 
+        "client": {"name": "Default", "primary_color": "#e53935"},
+        "is_multi_tenant": False
+    }
+
 # ============ BASIC ROUTES ============
 
 @api_router.get("/")
 async def root():
-    return {"message": "Navixy Fleet Dashboard API"}
+    return {"message": "Navixy Fleet Dashboard API - Multi-Client"}
 
 @api_router.post("/status", response_model=StatusCheck)
 async def create_status_check(input: StatusCheckCreate):
@@ -142,9 +299,10 @@ async def get_status_checks():
 # ============ NAVIXY TRACKERS/VEHICLES ============
 
 @api_router.get("/trackers")
-async def get_trackers():
+async def get_trackers(request: Request):
     """Get all trackers from Navixy"""
-    data = await navixy_request("tracker/list")
+    navixy_hash = await get_navixy_hash(request)
+    data = await navixy_request("tracker/list", navixy_hash=navixy_hash)
     if data.get('success'):
         trackers = []
         for t in data.get('list', []):
@@ -161,23 +319,26 @@ async def get_trackers():
     return {"success": False, "error": data.get('status', {}).get('description', 'Unknown error')}
 
 @api_router.get("/tracker/{tracker_id}/state")
-async def get_tracker_state(tracker_id: int):
+async def get_tracker_state(tracker_id: int, request: Request):
     """Get current state of a tracker"""
-    data = await navixy_request("tracker/get_state", {"tracker_id": tracker_id})
+    navixy_hash = await get_navixy_hash(request)
+    data = await navixy_request("tracker/get_state", {"tracker_id": tracker_id}, navixy_hash=navixy_hash)
     return data
 
 @api_router.get("/tracker/{tracker_id}/readings")
-async def get_tracker_readings(tracker_id: int):
+async def get_tracker_readings(tracker_id: int, request: Request):
     """Get latest readings from a tracker"""
-    data = await navixy_request("tracker/readings/list", {"tracker_id": tracker_id})
+    navixy_hash = await get_navixy_hash(request)
+    data = await navixy_request("tracker/readings/list", {"tracker_id": tracker_id}, navixy_hash=navixy_hash)
     return data
 
 # ============ EMPLOYEES/DRIVERS ============
 
 @api_router.get("/employees")
-async def get_employees():
+async def get_employees(request: Request):
     """Get all employees/drivers from Navixy"""
-    data = await navixy_request("employee/list")
+    navixy_hash = await get_navixy_hash(request)
+    data = await navixy_request("employee/list", navixy_hash=navixy_hash)
     if data.get('success'):
         employees = []
         for e in data.get('list', []):
@@ -197,13 +358,16 @@ async def get_employees():
 
 @api_router.get("/fleet/stats")
 async def get_fleet_stats(
+    request: Request,
     from_date: str = Query(..., description="Start date YYYY-MM-DD"),
     to_date: str = Query(..., description="End date YYYY-MM-DD"),
     tracker_ids: Optional[str] = Query(None, description="Comma-separated tracker IDs")
 ):
     """Get fleet efficiency statistics"""
+    navixy_hash = await get_navixy_hash(request)
+    
     # Get list of trackers
-    trackers_data = await navixy_request("tracker/list")
+    trackers_data = await navixy_request("tracker/list", navixy_hash=navixy_hash)
     if not trackers_data.get('success'):
         raise HTTPException(status_code=400, detail="Failed to fetch trackers")
     
@@ -225,12 +389,12 @@ async def get_fleet_stats(
         # Get counter values for mileage and engine hours
         counters_data = await navixy_request("tracker/counter/read", {
             "tracker_id": tracker_id
-        })
+        }, navixy_hash=navixy_hash)
         
         # Get state for additional info
         state_data = await navixy_request("tracker/get_state", {
             "tracker_id": tracker_id
-        })
+        }, navixy_hash=navixy_hash)
         
         mileage = 0
         engine_hours = 0

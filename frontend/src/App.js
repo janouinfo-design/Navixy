@@ -15,11 +15,46 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell
 } from "recharts";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
+// Dynamic API URL - use current host for multi-tenant
+const getApiUrl = () => {
+  // In production, use the same domain
+  if (window.location.hostname.includes('logitrak.ch')) {
+    return `https://${window.location.hostname}/api`;
+  }
+  // Fallback to env variable for development
+  return process.env.REACT_APP_BACKEND_URL 
+    ? `${process.env.REACT_APP_BACKEND_URL}/api`
+    : '/api';
+};
+
+const API = getApiUrl();
+
+// ============ CLIENT CONTEXT ============
+const useClientInfo = () => {
+  const [clientInfo, setClientInfo] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchClientInfo = async () => {
+      try {
+        const response = await axios.get(`${API}/client/info`);
+        if (response.data.success) {
+          setClientInfo(response.data.client);
+        }
+      } catch (error) {
+        console.error("Error fetching client info:", error);
+      }
+      setLoading(false);
+    };
+
+    fetchClientInfo();
+  }, []);
+
+  return { clientInfo, loading };
+};
 
 // ============ SIDEBAR COMPONENT ============
-const Sidebar = ({ activeView, setActiveView, isOpen, setIsOpen }) => {
+const Sidebar = ({ activeView, setActiveView, isOpen, setIsOpen, clientInfo }) => {
   const menuItems = [
     { id: "dashboard", label: "Dashboard", icon: BarChart3 },
     { id: "fleet", label: "Efficacité Flotte", icon: Truck },
@@ -28,6 +63,8 @@ const Sidebar = ({ activeView, setActiveView, isOpen, setIsOpen }) => {
     { id: "trends", label: "Tendances", icon: TrendingUp },
     { id: "iot-flow", label: "Logique IoT", icon: Zap },
   ];
+
+  const primaryColor = clientInfo?.primary_color || "#e53935";
 
   return (
     <>
@@ -46,9 +83,13 @@ const Sidebar = ({ activeView, setActiveView, isOpen, setIsOpen }) => {
       `}>
         <div className="p-4 border-b border-gray-200">
           <div className="flex items-center justify-between">
-            <h1 className="text-xl font-bold text-gray-800">
-              <span className="text-red-500">Navixy</span> Dashboard
-            </h1>
+            {clientInfo?.logo_url ? (
+              <img src={clientInfo.logo_url} alt={clientInfo.name} className="h-8" />
+            ) : (
+              <h1 className="text-xl font-bold text-gray-800">
+                <span style={{ color: primaryColor }}>{clientInfo?.name || 'Logitrak'}</span>
+              </h1>
+            )}
             <button 
               className="lg:hidden p-2 hover:bg-gray-100 rounded"
               onClick={() => setIsOpen(false)}
@@ -1612,6 +1653,7 @@ const IoTFlowView = () => {
 function App() {
   const [activeView, setActiveView] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { clientInfo, loading: clientLoading } = useClientInfo();
 
   const getTitle = () => {
     const titles = {
@@ -1625,6 +1667,21 @@ function App() {
     return titles[activeView] || "Dashboard";
   };
 
+  // Apply client theme
+  useEffect(() => {
+    if (clientInfo?.primary_color) {
+      document.documentElement.style.setProperty('--primary-color', clientInfo.primary_color);
+    }
+  }, [clientInfo]);
+
+  if (clientLoading) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-50">
+        <RefreshCw className="animate-spin text-red-500" size={40} />
+      </div>
+    );
+  }
+
   return (
     <div className="h-screen flex bg-gray-50" data-testid="app-container">
       <Sidebar 
@@ -1632,6 +1689,7 @@ function App() {
         setActiveView={setActiveView}
         isOpen={sidebarOpen}
         setIsOpen={setSidebarOpen}
+        clientInfo={clientInfo}
       />
       
       <div className="flex-1 flex flex-col min-w-0">

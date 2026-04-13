@@ -13,7 +13,7 @@ services:
     networks:
       - navixy-network
 
-  # Backend API (FastAPI)
+  # Backend API (FastAPI) - Multi-Client
   backend:
     build: ./backend
     container_name: navixy-backend
@@ -23,9 +23,10 @@ services:
     environment:
       - MONGO_URL=mongodb://mongodb:27017
       - DB_NAME=navixy_dashboard
-      - NAVIXY_HASH=a25480874b7492bd01ff1d926061e491
+      - NAVIXY_HASH=${DEFAULT_NAVIXY_HASH:-a25480874b7492bd01ff1d926061e491}
       - NAVIXY_API_URL=https://api.navixy.com/v2
-      - CORS_ORIGINS=https://www.logitrak.ch,https://logitrak.ch,http://localhost:3000
+      - BASE_DOMAIN=logitrak.ch
+      - CORS_ORIGINS=https://*.logitrak.ch,https://logitrak.ch,http://localhost:3000
     depends_on:
       - mongodb
     networks:
@@ -36,7 +37,7 @@ services:
     build:
       context: ./frontend
       args:
-        - REACT_APP_BACKEND_URL=https://www.logitrak.ch/api
+        - REACT_APP_BACKEND_URL=
     container_name: navixy-frontend
     restart: always
     ports:

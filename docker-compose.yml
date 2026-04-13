@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:6
+    container_name: navixy-mongodb
+    restart: always
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      - MONGO_INITDB_DATABASE=navixy_dashboard
+    networks:
+      - navixy-network
+
+  # Backend API (FastAPI)
+  backend:
+    build: ./backend
+    container_name: navixy-backend
+    restart: always
+    ports:
+      - "8001:8000"
+    environment:
+      - MONGO_URL=mongodb://mongodb:27017
+      - DB_NAME=navixy_dashboard
+      - NAVIXY_HASH=a25480874b7492bd01ff1d926061e491
+      - NAVIXY_API_URL=https://api.navixy.com/v2
+      - CORS_ORIGINS=https://${DOMAIN_NAME},http://${DOMAIN_NAME},http://localhost:3000
+    depends_on:
+      - mongodb
+    networks:
+      - navixy-network
+
+  # Frontend (React + Nginx)
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        - REACT_APP_BACKEND_URL=https://${DOMAIN_NAME}/api
+    container_name: navixy-frontend
+    restart: always
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - navixy-network
+
+  # Nginx Reverse Proxy with SSL
+  nginx-proxy:
+    image: nginx:alpine
+    container_name: navixy-nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx-proxy.conf:/etc/nginx/conf.d/default.conf
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - navixy-network
+
+  # Certbot for SSL
+  certbot:
+    image: certbot/certbot
+    container_name: navixy-certbot
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    networks:
+      - navixy-network
+
+volumes:
+  mongodb_data:
+
+networks:
+  navixy-network:
+    driver: bridge

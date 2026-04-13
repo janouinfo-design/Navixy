@@ -179,7 +179,110 @@ const StatCard = ({ label, value, icon: Icon, color = "gray", trend }) => {
   );
 };
 
-// ============ DATE PICKER COMPONENT ============
+// ============ PERIOD SELECTOR COMPONENT ============
+const PeriodSelector = ({ period, setPeriod, fromDate, setFromDate, toDate, setToDate, onApply }) => {
+  const [showCustom, setShowCustom] = useState(false);
+
+  const handlePeriodChange = (newPeriod) => {
+    setPeriod(newPeriod);
+    const today = new Date();
+    let from, to;
+    
+    switch(newPeriod) {
+      case 'today':
+        from = to = today.toISOString().split('T')[0];
+        break;
+      case 'week':
+        from = new Date(today.setDate(today.getDate() - 7)).toISOString().split('T')[0];
+        to = new Date().toISOString().split('T')[0];
+        break;
+      case 'month':
+        from = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+        to = new Date().toISOString().split('T')[0];
+        break;
+      case 'custom':
+        setShowCustom(true);
+        return;
+      default:
+        from = to = today.toISOString().split('T')[0];
+    }
+    
+    setFromDate(from);
+    setToDate(to);
+    setShowCustom(false);
+    if (onApply) onApply(from, to);
+  };
+
+  const applyCustom = () => {
+    setShowCustom(false);
+    if (onApply) onApply(fromDate, toDate);
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="flex items-center bg-white border border-gray-200 rounded-lg overflow-hidden">
+        {[
+          { id: 'today', label: "Aujourd'hui" },
+          { id: 'week', label: 'Semaine' },
+          { id: 'month', label: 'Mois' },
+          { id: 'custom', label: 'Personnalisé' }
+        ].map((p) => (
+          <button
+            key={p.id}
+            data-testid={`period-${p.id}`}
+            onClick={() => handlePeriodChange(p.id)}
+            className={`px-3 lg:px-4 py-2 text-sm font-medium transition-colors border-r border-gray-200 last:border-r-0 ${
+              period === p.id 
+                ? 'bg-red-500 text-white' 
+                : 'text-gray-600 hover:bg-gray-100'
+            }`}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      {(showCustom || period === 'custom') && (
+        <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg p-2">
+          <Calendar size={16} className="text-gray-400" />
+          <input
+            type="date"
+            value={fromDate}
+            onChange={(e) => setFromDate(e.target.value)}
+            className="text-sm border-none focus:outline-none w-32"
+            data-testid="from-date"
+          />
+          <span className="text-gray-400">→</span>
+          <input
+            type="date"
+            value={toDate}
+            onChange={(e) => setToDate(e.target.value)}
+            className="text-sm border-none focus:outline-none w-32"
+            data-testid="to-date"
+          />
+          <button
+            onClick={applyCustom}
+            className="px-3 py-1 bg-red-500 text-white rounded text-sm hover:bg-red-600"
+            data-testid="apply-custom"
+          >
+            OK
+          </button>
+        </div>
+      )}
+
+      {period !== 'custom' && (
+        <div className="text-sm text-gray-500 bg-gray-50 px-3 py-2 rounded-lg">
+          {fromDate === toDate 
+            ? new Date(fromDate).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })
+            : `${new Date(fromDate).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} - ${new Date(toDate).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}`
+          }
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ============ DATE PICKER COMPONENT (Legacy) ============
 const DatePicker = ({ date, setDate, period, setPeriod }) => {
   const navigateDate = (direction) => {
     const d = new Date(date);
@@ -240,13 +343,15 @@ const DatePicker = ({ date, setDate, period, setPeriod }) => {
 const DashboardView = () => {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [period, setPeriod] = useState('today');
+  const [fromDate, setFromDate] = useState(new Date().toISOString().split('T')[0]);
+  const [toDate, setToDate] = useState(new Date().toISOString().split('T')[0]);
 
-  const fetchStats = useCallback(async () => {
+  const fetchStats = useCallback(async (from, to) => {
     setLoading(true);
     try {
       const response = await axios.get(`${API}/fleet/stats`, {
-        params: { from_date: date, to_date: date }
+        params: { from_date: from || fromDate, to_date: to || toDate }
       });
       if (response.data.success) {
         setStats(response.data);
@@ -255,11 +360,16 @@ const DashboardView = () => {
       console.error("Error fetching stats:", error);
     }
     setLoading(false);
-  }, [date]);
+  }, [fromDate, toDate]);
 
   useEffect(() => {
     fetchStats();
-  }, [fetchStats]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handlePeriodApply = (from, to) => {
+    fetchStats(from, to);
+  };
 
   if (loading) {
     return (
@@ -274,16 +384,27 @@ const DashboardView = () => {
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
           <h3 className="text-lg font-semibold text-gray-800">Vue d'ensemble</h3>
-          <p className="text-sm text-gray-500">Statistiques en temps réel de votre flotte</p>
+          <p className="text-sm text-gray-500">Statistiques de votre flotte</p>
         </div>
-        <button 
-          onClick={fetchStats}
-          className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
-          data-testid="refresh-btn"
-        >
-          <RefreshCw size={18} />
-          Actualiser
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <PeriodSelector 
+            period={period}
+            setPeriod={setPeriod}
+            fromDate={fromDate}
+            setFromDate={setFromDate}
+            toDate={toDate}
+            setToDate={setToDate}
+            onApply={handlePeriodApply}
+          />
+          <button 
+            onClick={() => fetchStats()}
+            className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+            data-testid="refresh-btn"
+          >
+            <RefreshCw size={18} />
+            Actualiser
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -301,7 +422,7 @@ const DashboardView = () => {
         />
         <StatCard 
           label="Kilométrage Total" 
-          value={`${(stats?.summary?.total_mileage / 1000).toFixed(0)} km`} 
+          value={`${((stats?.summary?.total_mileage || 0) / 1000).toFixed(0)} km`} 
           icon={MapPin} 
           color="red" 
         />
@@ -373,14 +494,15 @@ const DashboardView = () => {
 const FleetEfficiencyView = () => {
   const [efficiency, setEfficiency] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [period, setPeriod] = useState('day');
+  const [period, setPeriod] = useState('today');
+  const [fromDate, setFromDate] = useState(new Date().toISOString().split('T')[0]);
+  const [toDate, setToDate] = useState(new Date().toISOString().split('T')[0]);
 
-  const fetchEfficiency = useCallback(async () => {
+  const fetchEfficiency = useCallback(async (from, to) => {
     setLoading(true);
     try {
       const response = await axios.get(`${API}/fleet/efficiency`, {
-        params: { date, period }
+        params: { date: from || fromDate, period: period === 'today' ? 'day' : period }
       });
       if (response.data.success) {
         setEfficiency(response.data);
@@ -389,11 +511,16 @@ const FleetEfficiencyView = () => {
       console.error("Error fetching efficiency:", error);
     }
     setLoading(false);
-  }, [date, period]);
+  }, [fromDate, period]);
 
   useEffect(() => {
     fetchEfficiency();
-  }, [fetchEfficiency]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handlePeriodApply = (from, to) => {
+    fetchEfficiency(from, to);
+  };
 
   const formatTime = (seconds) => {
     if (!seconds) return '-';
@@ -406,14 +533,14 @@ const FleetEfficiencyView = () => {
   const exportReport = async (format) => {
     try {
       const response = await axios.get(`${API}/export/fleet-stats`, {
-        params: { from_date: date, to_date: date, format },
+        params: { from_date: fromDate, to_date: toDate, format },
         responseType: 'blob'
       });
       
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `fleet_stats_${date}.${format}`);
+      link.setAttribute('download', `fleet_stats_${fromDate}_${toDate}.${format}`);
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -438,7 +565,15 @@ const FleetEfficiencyView = () => {
         </div>
         
         <div className="flex flex-wrap items-center gap-2">
-          <DatePicker date={date} setDate={setDate} period={period} setPeriod={setPeriod} />
+          <PeriodSelector 
+            period={period}
+            setPeriod={setPeriod}
+            fromDate={fromDate}
+            setFromDate={setFromDate}
+            toDate={toDate}
+            setToDate={setToDate}
+            onApply={handlePeriodApply}
+          />
           
           <div className="flex items-center gap-2">
             <button 
@@ -543,17 +678,18 @@ const FleetEfficiencyView = () => {
 const DriverReportView = () => {
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [period, setPeriod] = useState('week');
   const [fromDate, setFromDate] = useState(
     new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
   );
   const [toDate, setToDate] = useState(new Date().toISOString().split('T')[0]);
   const [expandedDriver, setExpandedDriver] = useState(null);
 
-  const fetchReport = useCallback(async () => {
+  const fetchReport = useCallback(async (from, to) => {
     setLoading(true);
     try {
       const response = await axios.get(`${API}/reports/driver`, {
-        params: { from_date: fromDate, to_date: toDate }
+        params: { from_date: from || fromDate, to_date: to || toDate }
       });
       if (response.data.success) {
         setReport(response.data);
@@ -566,7 +702,12 @@ const DriverReportView = () => {
 
   useEffect(() => {
     fetchReport();
-  }, [fetchReport]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handlePeriodApply = (from, to) => {
+    fetchReport(from, to);
+  };
 
   const exportReport = async (format) => {
     try {
@@ -604,30 +745,15 @@ const DriverReportView = () => {
         </div>
         
         <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg p-2">
-            <Calendar size={16} className="text-gray-400" />
-            <input
-              type="date"
-              value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
-              className="text-sm border-none focus:outline-none"
-            />
-            <span className="text-gray-400">→</span>
-            <input
-              type="date"
-              value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
-              className="text-sm border-none focus:outline-none"
-            />
-          </div>
-          
-          <button 
-            onClick={fetchReport}
-            className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
-          >
-            <Filter size={16} />
-            Appliquer
-          </button>
+          <PeriodSelector 
+            period={period}
+            setPeriod={setPeriod}
+            fromDate={fromDate}
+            setFromDate={setFromDate}
+            toDate={toDate}
+            setToDate={setToDate}
+            onApply={handlePeriodApply}
+          />
           
           <button 
             onClick={() => exportReport('csv')}

@@ -64,18 +64,14 @@ async def get_client_from_subdomain(request: Request) -> Optional[dict]:
     
     return None
 
-async def get_navixy_hash(request: Request, x_client_hash: Optional[str] = Header(None)) -> str:
-    """Get Navixy hash from client subdomain or header"""
-    # Priority 1: Header (for testing)
-    if x_client_hash:
-        return x_client_hash
-    
-    # Priority 2: Subdomain-based client
+async def get_navixy_hash_from_request(request: Request) -> str:
+    """Get Navixy hash from client subdomain"""
+    # Try to get from subdomain
     client_info = await get_client_from_subdomain(request)
     if client_info and client_info.get('navixy_hash'):
         return client_info['navixy_hash']
     
-    # Priority 3: Default hash
+    # Default hash
     return DEFAULT_NAVIXY_HASH
 
 # ============ MODELS ============
@@ -301,7 +297,7 @@ async def get_status_checks():
 @api_router.get("/trackers")
 async def get_trackers(request: Request):
     """Get all trackers from Navixy"""
-    navixy_hash = await get_navixy_hash(request)
+    navixy_hash = await get_navixy_hash_from_request(request)
     data = await navixy_request("tracker/list", navixy_hash=navixy_hash)
     if data.get('success'):
         trackers = []
@@ -321,14 +317,14 @@ async def get_trackers(request: Request):
 @api_router.get("/tracker/{tracker_id}/state")
 async def get_tracker_state(tracker_id: int, request: Request):
     """Get current state of a tracker"""
-    navixy_hash = await get_navixy_hash(request)
+    navixy_hash = await get_navixy_hash_from_request(request)
     data = await navixy_request("tracker/get_state", {"tracker_id": tracker_id}, navixy_hash=navixy_hash)
     return data
 
 @api_router.get("/tracker/{tracker_id}/readings")
 async def get_tracker_readings(tracker_id: int, request: Request):
     """Get latest readings from a tracker"""
-    navixy_hash = await get_navixy_hash(request)
+    navixy_hash = await get_navixy_hash_from_request(request)
     data = await navixy_request("tracker/readings/list", {"tracker_id": tracker_id}, navixy_hash=navixy_hash)
     return data
 
@@ -337,7 +333,7 @@ async def get_tracker_readings(tracker_id: int, request: Request):
 @api_router.get("/employees")
 async def get_employees(request: Request):
     """Get all employees/drivers from Navixy"""
-    navixy_hash = await get_navixy_hash(request)
+    navixy_hash = await get_navixy_hash_from_request(request)
     data = await navixy_request("employee/list", navixy_hash=navixy_hash)
     if data.get('success'):
         employees = []
@@ -364,7 +360,7 @@ async def get_fleet_stats(
     tracker_ids: Optional[str] = Query(None, description="Comma-separated tracker IDs")
 ):
     """Get fleet efficiency statistics"""
-    navixy_hash = await get_navixy_hash(request)
+    navixy_hash = await get_navixy_hash_from_request(request)
     
     # Get list of trackers
     trackers_data = await navixy_request("tracker/list", navixy_hash=navixy_hash)

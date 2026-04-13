@@ -18,7 +18,7 @@ services:
     container_name: navixy-backend
     restart: always
     ports:
-      - "127.0.0.1:8010:8000"  # Port 8010 pour éviter conflits
+      - "127.0.0.1:8005:8000"  # Port 8005
     environment:
       - MONGO_URL=mongodb://mongodb:27017
       - DB_NAME=navixy_dashboard
@@ -40,7 +40,7 @@ services:
     container_name: navixy-frontend
     restart: always
     ports:
-      - "127.0.0.1:8011:80"  # Port 8011 pour éviter conflits
+      - "127.0.0.1:8006:80"  # Port 8006
     depends_on:
       - backend
     networks:

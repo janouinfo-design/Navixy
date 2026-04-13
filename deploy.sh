@@ -94,7 +94,7 @@ nginx -t && systemctl reload nginx
 
 echo -e "${YELLOW}[7/7] Configuration du client par défaut...${NC}"
 sleep 5
-curl -s -X POST "http://127.0.0.1:8010/api/admin/clients" \
+curl -s -X POST "http://127.0.0.1:8005/api/admin/clients" \
 -H "Content-Type: application/json" \
 -d '{
   "name": "Dashboard Principal",
@@ -117,8 +117,8 @@ echo -e "  ✅ logitime - intact"
 echo -e "  ✅ www.logitrak.ch - intact"
 echo ""
 echo -e "Ports utilisés par le dashboard:"
-echo -e "  Backend:  127.0.0.1:8010"
-echo -e "  Frontend: 127.0.0.1:8011"
+echo -e "  Backend:  127.0.0.1:8005"
+echo -e "  Frontend: 127.0.0.1:8006"
 echo ""
 echo -e "Commandes utiles:"
 echo -e "  📋 Logs:    ${YELLOW}cd /opt/navixy-dashboard && docker-compose logs -f${NC}"

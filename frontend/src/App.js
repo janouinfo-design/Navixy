@@ -59,7 +59,6 @@ const Sidebar = ({ activeView, setActiveView, isOpen, setIsOpen, clientInfo }) =
     { id: "dashboard", label: "Dashboard", icon: BarChart3 },
     { id: "fleet", label: "Efficacité Flotte", icon: Truck },
     { id: "drivers", label: "Rapport Conducteurs", icon: Users },
-    { id: "map", label: "Carte Temps Réel", icon: Map },
     { id: "trends", label: "Tendances", icon: TrendingUp },
     { id: "iot-flow", label: "Logique IoT", icon: Zap },
   ];
@@ -1660,7 +1659,6 @@ function App() {
       dashboard: "Dashboard",
       fleet: "Efficacité de la flotte",
       drivers: "Rapport Conducteurs",
-      map: "Carte Temps Réel",
       trends: "Tendances & Analyse",
       "iot-flow": "Logique IoT"
     };
@@ -1699,7 +1697,6 @@ function App() {
           {activeView === "dashboard" && <DashboardView />}
           {activeView === "fleet" && <FleetEfficiencyView />}
           {activeView === "drivers" && <DriverReportView />}
-          {activeView === "map" && <MapView />}
           {activeView === "trends" && <TrendsView />}
           {activeView === "iot-flow" && <IoTFlowView />}
         </main>

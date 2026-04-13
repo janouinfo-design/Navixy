@@ -2,111 +2,79 @@
 
 #############################################
 # Script de déploiement Navixy Dashboard
-# Pour Ubuntu/Debian avec Docker
+# Pour www.logitrak.ch
 #############################################
 
 set -e
 
-# Couleurs pour les messages
-RED='\033[0;31m'
+# Couleurs
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+RED='\033[0;31m'
+NC='\033[0m'
+
+DOMAIN="www.logitrak.ch"
+EMAIL="admin@logitrak.ch"  # Changez si nécessaire
 
 echo -e "${GREEN}=========================================${NC}"
 echo -e "${GREEN} Déploiement Navixy Dashboard${NC}"
+echo -e "${GREEN} Domaine: $DOMAIN${NC}"
 echo -e "${GREEN}=========================================${NC}"
 
-# Vérifier si le script est exécuté en root
+# Vérifier root
 if [ "$EUID" -ne 0 ]; then 
-    echo -e "${RED}Veuillez exécuter ce script en tant que root (sudo)${NC}"
+    echo -e "${RED}Exécutez avec sudo: sudo ./deploy.sh${NC}"
     exit 1
 fi
 
-# Demander le nom de domaine
-read -p "Entrez votre nom de domaine (ex: dashboard.monsite.com): " DOMAIN_NAME
-if [ -z "$DOMAIN_NAME" ]; then
-    echo -e "${RED}Le nom de domaine est requis!${NC}"
-    exit 1
+# Demander l'email si différent
+read -p "Email pour SSL (appuyez Entrée pour $EMAIL): " INPUT_EMAIL
+if [ ! -z "$INPUT_EMAIL" ]; then
+    EMAIL=$INPUT_EMAIL
 fi
 
-# Demander l'email pour Let's Encrypt
-read -p "Entrez votre email (pour Let's Encrypt SSL): " EMAIL
-if [ -z "$EMAIL" ]; then
-    echo -e "${RED}L'email est requis pour SSL!${NC}"
-    exit 1
-fi
+echo -e "${YELLOW}[1/6] Mise à jour du système...${NC}"
+apt-get update -qq
 
-echo -e "${YELLOW}Installation des dépendances...${NC}"
-
-# Mettre à jour le système
-apt-get update
-apt-get upgrade -y
-
-# Installer Docker si non présent
+echo -e "${YELLOW}[2/6] Installation de Docker...${NC}"
 if ! command -v docker &> /dev/null; then
-    echo -e "${YELLOW}Installation de Docker...${NC}"
-    curl -fsSL https://get.docker.com -o get-docker.sh
-    sh get-docker.sh
-    rm get-docker.sh
+    curl -fsSL https://get.docker.com | sh
     systemctl enable docker
     systemctl start docker
 fi
 
-# Installer Docker Compose si non présent
 if ! command -v docker-compose &> /dev/null; then
-    echo -e "${YELLOW}Installation de Docker Compose...${NC}"
     curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
     chmod +x /usr/local/bin/docker-compose
 fi
 
-# Créer le répertoire de l'application
-APP_DIR="/opt/navixy-dashboard"
-mkdir -p $APP_DIR
-cd $APP_DIR
-
-echo -e "${YELLOW}Configuration du domaine: $DOMAIN_NAME${NC}"
-
-# Remplacer le domaine dans la config nginx
-sed -i "s/VOTRE_DOMAINE/$DOMAIN_NAME/g" nginx-proxy.conf
-
-# Créer le fichier .env
-cat > .env << EOF
-DOMAIN_NAME=$DOMAIN_NAME
-EOF
-
-# Créer les répertoires pour Certbot
+echo -e "${YELLOW}[3/6] Préparation des certificats SSL...${NC}"
 mkdir -p certbot/conf certbot/www
 
-echo -e "${YELLOW}Obtention du certificat SSL...${NC}"
-
-# Arrêter nginx temporairement si en cours d'exécution
+# Arrêter les conteneurs existants
 docker-compose down 2>/dev/null || true
+docker stop nginx-temp 2>/dev/null || true
+docker rm nginx-temp 2>/dev/null || true
 
-# Créer une config nginx temporaire pour le challenge SSL
-cat > nginx-proxy-temp.conf << EOF
+# Config nginx temporaire pour SSL
+cat > /tmp/nginx-temp.conf << 'EOF'
 server {
     listen 80;
-    server_name $DOMAIN_NAME;
-    
-    location /.well-known/acme-challenge/ {
-        root /var/www/certbot;
-    }
-    
-    location / {
-        return 200 'OK';
-    }
+    server_name www.logitrak.ch logitrak.ch;
+    location /.well-known/acme-challenge/ { root /var/www/certbot; }
+    location / { return 200 'OK'; }
 }
 EOF
 
-# Démarrer nginx temporaire
+echo -e "${YELLOW}[4/6] Obtention du certificat SSL Let's Encrypt...${NC}"
 docker run -d --name nginx-temp \
     -p 80:80 \
-    -v $(pwd)/nginx-proxy-temp.conf:/etc/nginx/conf.d/default.conf \
+    -v /tmp/nginx-temp.conf:/etc/nginx/conf.d/default.conf \
     -v $(pwd)/certbot/www:/var/www/certbot \
     nginx:alpine
 
-# Obtenir le certificat SSL
+sleep 3
+
 docker run --rm \
     -v $(pwd)/certbot/conf:/etc/letsencrypt \
     -v $(pwd)/certbot/www:/var/www/certbot \
@@ -116,31 +84,29 @@ docker run --rm \
     --email $EMAIL \
     --agree-tos \
     --no-eff-email \
-    -d $DOMAIN_NAME
+    -d www.logitrak.ch \
+    -d logitrak.ch
 
-# Arrêter nginx temporaire
 docker stop nginx-temp
 docker rm nginx-temp
-rm nginx-proxy-temp.conf
 
-echo -e "${YELLOW}Construction et démarrage des conteneurs...${NC}"
+echo -e "${YELLOW}[5/6] Construction des conteneurs Docker...${NC}"
+docker-compose build --no-cache
 
-# Construire et démarrer tous les services
-docker-compose up -d --build
+echo -e "${YELLOW}[6/6] Démarrage des services...${NC}"
+docker-compose up -d
 
+echo ""
 echo -e "${GREEN}=========================================${NC}"
-echo -e "${GREEN} Déploiement terminé !${NC}"
+echo -e "${GREEN} ✅ DÉPLOIEMENT TERMINÉ !${NC}"
 echo -e "${GREEN}=========================================${NC}"
 echo ""
 echo -e "Votre dashboard est accessible sur:"
-echo -e "${GREEN}  https://$DOMAIN_NAME${NC}"
+echo -e "${GREEN}  🌐 https://www.logitrak.ch${NC}"
 echo ""
-echo -e "Pour voir les logs:"
-echo -e "  docker-compose logs -f"
-echo ""
-echo -e "Pour redémarrer:"
-echo -e "  docker-compose restart"
-echo ""
-echo -e "Pour arrêter:"
-echo -e "  docker-compose down"
+echo -e "Commandes utiles:"
+echo -e "  📋 Voir les logs:     ${YELLOW}docker-compose logs -f${NC}"
+echo -e "  🔄 Redémarrer:        ${YELLOW}docker-compose restart${NC}"
+echo -e "  ⏹️  Arrêter:           ${YELLOW}docker-compose down${NC}"
+echo -e "  📊 Statut:            ${YELLOW}docker-compose ps${NC}"
 echo ""

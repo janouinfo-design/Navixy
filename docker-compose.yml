@@ -25,7 +25,7 @@ services:
       - DB_NAME=navixy_dashboard
       - NAVIXY_HASH=a25480874b7492bd01ff1d926061e491
       - NAVIXY_API_URL=https://api.navixy.com/v2
-      - CORS_ORIGINS=https://${DOMAIN_NAME},http://${DOMAIN_NAME},http://localhost:3000
+      - CORS_ORIGINS=https://www.logitrak.ch,https://logitrak.ch,http://localhost:3000
     depends_on:
       - mongodb
     networks:
@@ -36,7 +36,7 @@ services:
     build:
       context: ./frontend
       args:
-        - REACT_APP_BACKEND_URL=https://${DOMAIN_NAME}/api
+        - REACT_APP_BACKEND_URL=https://www.logitrak.ch/api
     container_name: navixy-frontend
     restart: always
     ports:

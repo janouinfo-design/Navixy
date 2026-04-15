@@ -374,31 +374,42 @@ async def get_fleet_stats(
         ids = [int(x) for x in tracker_ids.split(',')]
         all_trackers = [t for t in all_trackers if t['id'] in ids]
     
+    # Batch fetch odometer and engine hours for ALL trackers at once
+    tracker_id_list = [t['id'] for t in all_trackers]
+    
+    odometer_values = {}
+    engine_hours_values = {}
+    
+    if tracker_id_list:
+        odo_data = await navixy_request("tracker/counter/value/list", {
+            "trackers": tracker_id_list,
+            "type": "odometer"
+        }, navixy_hash=navixy_hash)
+        if odo_data.get('success'):
+            odometer_values = odo_data.get('value', {})
+        
+        eh_data = await navixy_request("tracker/counter/value/list", {
+            "trackers": tracker_id_list,
+            "type": "engine_hours"
+        }, navixy_hash=navixy_hash)
+        if eh_data.get('success'):
+            engine_hours_values = eh_data.get('value', {})
+    
     stats = []
     total_mileage = 0
     total_engine_hours = 0
-    total_idle_time = 0
     
     for tracker in all_trackers:
         tracker_id = tracker['id']
         
-        # Get counter values for mileage and engine hours
-        counters_data = await navixy_request("tracker/counter/read", {
-            "tracker_id": tracker_id
-        }, navixy_hash=navixy_hash)
-        
-        # Get state for additional info
+        # Get state for GPS, speed, connection info
         state_data = await navixy_request("tracker/get_state", {
             "tracker_id": tracker_id
         }, navixy_hash=navixy_hash)
         
-        mileage = 0
-        engine_hours = 0
-        
-        if counters_data.get('success'):
-            counters = counters_data.get('value', {})
-            mileage = counters.get('odometer', 0) or 0
-            engine_hours = counters.get('engine_hours', 0) or 0
+        # Get mileage from batch results (key is string tracker_id)
+        mileage = odometer_values.get(str(tracker_id), 0) or 0
+        engine_hours = engine_hours_values.get(str(tracker_id), 0) or 0
         
         gps_state = state_data.get('state', {}).get('gps', {}) if state_data.get('success') else {}
         connection_status = state_data.get('state', {}).get('connection_status', 'unknown') if state_data.get('success') else 'unknown'

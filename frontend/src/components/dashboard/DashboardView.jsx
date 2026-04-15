@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { API, api } from "@/lib/api";
 import { Header } from "@/components/layout/Header";
 import { PeriodSelector } from "@/components/shared/PeriodSelector";
@@ -203,6 +203,7 @@ const FleetTable = ({ vehicles, comparison }) => {
   const [sortBy, setSortBy] = useState('label');
   const [sortDir, setSortDir] = useState('asc');
   const [filterStatus, setFilterStatus] = useState('all');
+  const [expandedVehicle, setExpandedVehicle] = useState(null);
 
   const compMap = {};
   (comparison?.vehicles || []).forEach(v => { compMap[v.tracker_id] = v; });
@@ -299,49 +300,155 @@ const FleetTable = ({ vehicles, comparison }) => {
           </thead>
           <tbody>
             {filtered.map((v) => (
-              <tr key={v.tracker_id} className="fleet-row border-b border-gray-50 last:border-b-0">
-                <td className="px-6 py-3.5">
-                  <span className="text-sm font-medium text-gray-900">{v.label}</span>
-                </td>
-                <td className="px-6 py-3.5">
-                  <span className="text-xs text-gray-500">{v.model || '-'}</span>
-                </td>
-                <td className="px-6 py-3.5">
-                  <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium border ${
-                    v.connection_status === 'active'
-                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                      : 'bg-gray-50 text-gray-600 border-gray-200'
-                  }`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${v.connection_status === 'active' ? 'bg-emerald-500 pulse-dot' : 'bg-gray-400'}`} />
-                    {v.connection_status === 'active' ? 'Actif' : 'Hors ligne'}
-                  </span>
-                </td>
-                <td className="px-6 py-3.5">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-16 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all ${
-                          v.efficiency_score >= 70 ? 'bg-emerald-500' :
-                          v.efficiency_score >= 40 ? 'bg-amber-500' : 'bg-red-500'
-                        }`}
-                        style={{ width: `${Math.min(100, v.efficiency_score)}%` }}
-                      />
+              <React.Fragment key={v.tracker_id}>
+                <tr
+                  className={`fleet-row border-b border-gray-50 last:border-b-0 cursor-pointer ${expandedVehicle === v.tracker_id ? 'bg-gray-50' : ''}`}
+                  onClick={() => setExpandedVehicle(expandedVehicle === v.tracker_id ? null : v.tracker_id)}
+                  data-testid={`vehicle-row-${v.tracker_id}`}
+                >
+                  <td className="px-6 py-3.5">
+                    <div className="flex items-center gap-2">
+                      <ChevronDown size={14} className={`text-gray-400 transition-transform ${expandedVehicle === v.tracker_id ? 'rotate-180' : ''}`} />
+                      <span className="text-sm font-medium text-gray-900">{v.label}</span>
                     </div>
-                    <span className={`text-xs font-semibold tabular-nums ${
-                      v.efficiency_score >= 70 ? 'text-emerald-600' :
-                      v.efficiency_score >= 40 ? 'text-amber-600' : 'text-red-500'
+                  </td>
+                  <td className="px-6 py-3.5">
+                    <span className="text-xs text-gray-500">{v.model || '-'}</span>
+                  </td>
+                  <td className="px-6 py-3.5">
+                    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium border ${
+                      v.connection_status === 'active'
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : 'bg-gray-50 text-gray-600 border-gray-200'
                     }`}>
-                      {v.efficiency_score}%
+                      <span className={`w-1.5 h-1.5 rounded-full ${v.connection_status === 'active' ? 'bg-emerald-500 pulse-dot' : 'bg-gray-400'}`} />
+                      {v.connection_status === 'active' ? 'Actif' : 'Hors ligne'}
                     </span>
-                  </div>
-                </td>
-                <td className="px-6 py-3.5">
-                  <span className="text-xs text-gray-600 tabular-nums">{v.speed || 0} km/h</span>
-                </td>
-                <td className="px-6 py-3.5">
-                  <span className="text-xs text-gray-600 tabular-nums">{((v.mileage || 0) / 1000).toFixed(0)} km</span>
-                </td>
-              </tr>
+                  </td>
+                  <td className="px-6 py-3.5">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-16 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${
+                            v.efficiency_score >= 70 ? 'bg-emerald-500' :
+                            v.efficiency_score >= 40 ? 'bg-amber-500' : 'bg-red-500'
+                          }`}
+                          style={{ width: `${Math.min(100, v.efficiency_score)}%` }}
+                        />
+                      </div>
+                      <span className={`text-xs font-semibold tabular-nums ${
+                        v.efficiency_score >= 70 ? 'text-emerald-600' :
+                        v.efficiency_score >= 40 ? 'text-amber-600' : 'text-red-500'
+                      }`}>
+                        {v.efficiency_score}%
+                      </span>
+                    </div>
+                  </td>
+                  <td className="px-6 py-3.5">
+                    <span className="text-xs text-gray-600 tabular-nums">{v.speed || 0} km/h</span>
+                  </td>
+                  <td className="px-6 py-3.5">
+                    <span className="text-xs text-gray-600 tabular-nums">{((v.mileage || 0) / 1000).toFixed(0)} km</span>
+                  </td>
+                </tr>
+
+                {/* Expanded Detail Panel */}
+                {expandedVehicle === v.tracker_id && (
+                  <tr>
+                    <td colSpan={6} className="px-0 py-0">
+                      <div className="bg-gray-50 border-b border-gray-200 px-8 py-5" data-testid={`vehicle-detail-${v.tracker_id}`}>
+                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                          {/* Efficiency Score */}
+                          <div className="bg-white rounded-xl p-4 border border-gray-200 text-center">
+                            <div className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">Efficacite</div>
+                            <div className={`text-3xl font-bold ${
+                              v.efficiency_score >= 70 ? 'text-emerald-600' :
+                              v.efficiency_score >= 40 ? 'text-amber-600' : 'text-red-500'
+                            }`} style={{ fontFamily: 'Outfit, sans-serif' }}>
+                              {v.efficiency_score}%
+                            </div>
+                            <div className="w-full h-2 bg-gray-100 rounded-full mt-2 overflow-hidden">
+                              <div className={`h-full rounded-full ${
+                                v.efficiency_score >= 70 ? 'bg-emerald-500' :
+                                v.efficiency_score >= 40 ? 'bg-amber-500' : 'bg-red-500'
+                              }`} style={{ width: `${Math.min(100, v.efficiency_score)}%` }} />
+                            </div>
+                          </div>
+
+                          {/* Speed */}
+                          <div className="bg-white rounded-xl p-4 border border-gray-200">
+                            <div className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">Vitesse</div>
+                            <div className="text-xl font-semibold text-gray-900" style={{ fontFamily: 'Outfit, sans-serif' }}>
+                              {v.speed || 0} <span className="text-xs font-normal text-gray-400">km/h</span>
+                            </div>
+                          </div>
+
+                          {/* Mileage */}
+                          <div className="bg-white rounded-xl p-4 border border-gray-200">
+                            <div className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">Kilometrage</div>
+                            <div className="text-xl font-semibold text-gray-900" style={{ fontFamily: 'Outfit, sans-serif' }}>
+                              {((v.mileage || 0) / 1000).toFixed(0)} <span className="text-xs font-normal text-gray-400">km</span>
+                            </div>
+                          </div>
+
+                          {/* Engine Hours */}
+                          <div className="bg-white rounded-xl p-4 border border-gray-200">
+                            <div className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">Heures moteur</div>
+                            <div className="text-xl font-semibold text-gray-900" style={{ fontFamily: 'Outfit, sans-serif' }}>
+                              {v.engine_hours || 0} <span className="text-xs font-normal text-gray-400">h</span>
+                            </div>
+                          </div>
+
+                          {/* Fuel Efficiency */}
+                          <div className="bg-white rounded-xl p-4 border border-gray-200">
+                            <div className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">Consommation</div>
+                            <div className="text-xl font-semibold text-gray-900" style={{ fontFamily: 'Outfit, sans-serif' }}>
+                              {v.fuel_efficiency || '-'} <span className="text-xs font-normal text-gray-400">L/100km</span>
+                            </div>
+                          </div>
+
+                          {/* Idle % */}
+                          <div className="bg-white rounded-xl p-4 border border-gray-200">
+                            <div className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">Temps ralenti</div>
+                            <div className={`text-xl font-semibold ${
+                              (v.idle_percentage || 0) > 25 ? 'text-amber-600' : 'text-gray-900'
+                            }`} style={{ fontFamily: 'Outfit, sans-serif' }}>
+                              {v.idle_percentage || 0} <span className="text-xs font-normal text-gray-400">%</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Additional info row */}
+                        <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-gray-500">
+                          <span>Modele: <strong className="text-gray-700">{v.model || '-'}</strong></span>
+                          <span>|</span>
+                          <span>Statut: <strong className={v.connection_status === 'active' ? 'text-emerald-600' : 'text-gray-700'}>
+                            {v.connection_status === 'active' ? 'Actif' : 'Hors ligne'}
+                          </strong></span>
+                          {v.last_update && (
+                            <>
+                              <span>|</span>
+                              <span>Derniere MAJ: <strong className="text-gray-700">{new Date(v.last_update).toLocaleString('fr-FR')}</strong></span>
+                            </>
+                          )}
+                          {v.location && (v.location.lat !== 0 || v.location.lng !== 0) && (
+                            <>
+                              <span>|</span>
+                              <span>GPS: <strong className="text-gray-700">{v.location.lat?.toFixed(4)}, {v.location.lng?.toFixed(4)}</strong></span>
+                            </>
+                          )}
+                          {v.violations_count > 0 && (
+                            <>
+                              <span>|</span>
+                              <span className="text-red-500">Violations: <strong>{v.violations_count}</strong></span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
             ))}
           </tbody>
         </table>

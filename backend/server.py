@@ -374,9 +374,29 @@ async def get_fleet_stats(
         ids = [int(x) for x in tracker_ids.split(',')]
         all_trackers = [t for t in all_trackers if t['id'] in ids]
     
-    # Batch fetch odometer and engine hours for ALL trackers at once
+    # Batch fetch mileage for the period using stats/mileage API (returns km per day)
     tracker_id_list = [t['id'] for t in all_trackers]
     
+    period_mileage = {}  # tracker_id -> total km in period
+    
+    if tracker_id_list:
+        mileage_data = await navixy_request("tracker/stats/mileage/read", {
+            "trackers": tracker_id_list,
+            "from": f"{from_date} 00:00:00",
+            "to": f"{to_date} 23:59:59"
+        }, navixy_hash=navixy_hash)
+        
+        if mileage_data.get('success'):
+            result = mileage_data.get('result', {})
+            for tid_str, days_data in result.items():
+                total_km = sum(
+                    (day.get('mileage', 0) if isinstance(day, dict) else 0)
+                    for day in days_data.values()
+                    if day is not None
+                )
+                period_mileage[tid_str] = round(total_km, 1)
+    
+    # Batch fetch total odometer and engine hours
     odometer_values = {}
     engine_hours_values = {}
     
@@ -401,30 +421,35 @@ async def get_fleet_stats(
     
     for tracker in all_trackers:
         tracker_id = tracker['id']
+        tid_str = str(tracker_id)
         
         # Get state for GPS, speed, connection info
         state_data = await navixy_request("tracker/get_state", {
             "tracker_id": tracker_id
         }, navixy_hash=navixy_hash)
         
-        # Get mileage from batch results (key is string tracker_id)
-        mileage = odometer_values.get(str(tracker_id), 0) or 0
-        engine_hours = engine_hours_values.get(str(tracker_id), 0) or 0
+        # Period mileage in km (from stats/mileage API)
+        mileage_km = period_mileage.get(tid_str, 0)
+        # Total odometer in km
+        total_odometer_km = odometer_values.get(tid_str, 0) or 0
+        # Engine hours
+        engine_hours = engine_hours_values.get(tid_str, 0) or 0
         
         gps_state = state_data.get('state', {}).get('gps', {}) if state_data.get('success') else {}
         connection_status = state_data.get('state', {}).get('connection_status', 'unknown') if state_data.get('success') else 'unknown'
         
-        # Calculate efficiency (simplified - based on connection status)
-        efficiency = 100 if connection_status == 'active' else 0
+        # Calculate efficiency based on mileage in period
+        efficiency = min(100, round((mileage_km / 100) * 10, 1)) if mileage_km > 0 else (100 if connection_status == 'active' else 0)
         
-        total_mileage += mileage
+        total_mileage += mileage_km
         total_engine_hours += engine_hours
         
         stats.append({
             "tracker_id": tracker_id,
             "label": tracker['label'],
             "model": tracker.get('source', {}).get('model', 'Unknown'),
-            "mileage": mileage,
+            "mileage": mileage_km,
+            "total_odometer": total_odometer_km,
             "engine_hours": engine_hours,
             "efficiency": efficiency,
             "connection_status": connection_status,

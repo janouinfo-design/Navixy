@@ -348,7 +348,7 @@ const FleetTable = ({ vehicles, comparison }) => {
                     <span className="text-xs text-gray-600 tabular-nums">{v.speed || 0} km/h</span>
                   </td>
                   <td className="px-6 py-3.5">
-                    <span className="text-xs text-gray-600 tabular-nums">{((v.mileage || 0) / 1000).toFixed(0)} km</span>
+                    <span className="text-xs text-gray-600 tabular-nums">{(v.mileage || 0).toFixed(1)} km</span>
                   </td>
                 </tr>
 
@@ -385,17 +385,17 @@ const FleetTable = ({ vehicles, comparison }) => {
 
                           {/* Mileage */}
                           <div className="bg-white rounded-xl p-4 border border-gray-200">
-                            <div className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">Kilometrage</div>
+                            <div className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">Distance (periode)</div>
                             <div className="text-xl font-semibold text-gray-900" style={{ fontFamily: 'Outfit, sans-serif' }}>
-                              {((v.mileage || 0) / 1000).toFixed(0)} <span className="text-xs font-normal text-gray-400">km</span>
+                              {(v.mileage || 0).toFixed(1)} <span className="text-xs font-normal text-gray-400">km</span>
                             </div>
                           </div>
 
-                          {/* Engine Hours */}
+                          {/* Total Odometer */}
                           <div className="bg-white rounded-xl p-4 border border-gray-200">
-                            <div className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">Heures moteur</div>
+                            <div className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">Odometre total</div>
                             <div className="text-xl font-semibold text-gray-900" style={{ fontFamily: 'Outfit, sans-serif' }}>
-                              {v.engine_hours || 0} <span className="text-xs font-normal text-gray-400">h</span>
+                              {((v.total_odometer || 0)).toLocaleString('fr-FR')} <span className="text-xs font-normal text-gray-400">km</span>
                             </div>
                           </div>
 
@@ -597,7 +597,7 @@ export const DashboardView = ({ onMenuClick }) => {
   const totalVehicles = vehicles.length;
   const movingVehicles = comparison?.vehicles?.filter(v => v.is_active).length || activeVehicles;
   const avgEfficiency = stats?.summary?.average_efficiency || 0;
-  const totalKm = ((stats?.summary?.total_mileage || 0) / 1000).toFixed(0);
+  const totalKm = (stats?.summary?.total_mileage || 0).toFixed(0);
   const totalEngineHours = stats?.summary?.total_engine_hours || 0;
   const avgFuelEfficiency = comparison?.vehicles?.length > 0
     ? (comparison.vehicles.reduce((s, v) => s + (v.fuel_efficiency || 0), 0) / comparison.vehicles.length).toFixed(1)

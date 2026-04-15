@@ -595,7 +595,7 @@ const FleetEfficiencyView = () => {
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 p-4 lg:p-6">
-        <div className="text-lg font-medium text-gray-700 mb-4">{date}</div>
+        <div className="text-lg font-medium text-gray-700 mb-4">{new Date(fromDate).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
           <div className="text-center p-4 bg-gray-50 rounded-lg">
             <div className="text-sm text-gray-500 mb-2">Efficacité moyenne</div>

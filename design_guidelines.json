@@ -1,0 +1,94 @@
+{
+  "theme": "light",
+  "archetype": "4 (Swiss & High-Contrast)",
+  "design_philosophy": "Premium minimalist logistics dashboard. No dark mode. High contrast, data-first layout. Functional authority with clean grids, generous white space, and crisp typography.",
+  "colors": {
+    "background": {
+      "app": "#F7F7F8",
+      "card": "#FFFFFF",
+      "header": "rgba(255, 255, 255, 0.8)"
+    },
+    "text": {
+      "primary": "#111111",
+      "secondary": "#5E5E62",
+      "tertiary": "#8A8A8E"
+    },
+    "border": {
+      "default": "rgba(17, 17, 17, 0.08)",
+      "focus": "#111111"
+    },
+    "accent": {
+      "primary": "#111111",
+      "primary_hover": "#333333",
+      "success": "#10B981",
+      "warning": "#F59E0B",
+      "danger": "#EF4444",
+      "info": "#3B82F6"
+    }
+  },
+  "typography": {
+    "fonts": {
+      "heading": "'Outfit', sans-serif",
+      "body": "'Inter', sans-serif",
+      "mono": "'JetBrains Mono', monospace"
+    },
+    "scale": {
+      "h1": "text-3xl tracking-tight font-medium",
+      "h2": "text-2xl tracking-tight font-medium",
+      "h3": "text-xl tracking-tight font-medium",
+      "h4": "text-lg tracking-tight font-medium",
+      "body": "text-sm",
+      "small": "text-xs font-medium uppercase tracking-wider"
+    }
+  },
+  "spacing_and_layout": {
+    "generous_spacing": true,
+    "dashboard_grid": "grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6",
+    "card_padding": "p-6",
+    "section_gap": "gap-8"
+  },
+  "components": {
+    "kpi_card": {
+      "style": "flat solid, 1px subtle border (#E5E7EB), no shadow by default, hover: shadow-sm, rounded-xl",
+      "layout": "flex flex-col gap-2 p-6 bg-white"
+    },
+    "header": {
+      "style": "sticky top-0 z-50 glassmorphism: backdrop-blur-xl bg-white/80 border-b border-gray-200 h-16 flex items-center justify-between px-8"
+    },
+    "sidebar": {
+      "style": "w-64 bg-[#F7F7F8] border-r border-gray-200 h-screen flex flex-col fixed left-0 top-0"
+    },
+    "buttons": {
+      "primary": "bg-black text-white hover:bg-gray-800 rounded-lg px-4 py-2 font-medium transition-colors",
+      "secondary": "bg-white text-black border border-gray-200 hover:bg-gray-50 rounded-lg px-4 py-2 font-medium transition-colors"
+    },
+    "badges": {
+      "success": "bg-green-100 text-green-800 border-green-200",
+      "warning": "bg-orange-100 text-orange-800 border-orange-200",
+      "danger": "bg-red-100 text-red-800 border-red-200",
+      "neutral": "bg-gray-100 text-gray-800 border-gray-200"
+    }
+  },
+  "media": {
+    "images": {
+      "avatar": "https://images.unsplash.com/photo-1584940120505-117038d90b05?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzh8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBjb3Jwb3JhdGUlMjBhdmF0YXIlMjBwb3J0cmFpdHxlbnwwfHx8fDE3NzYyNjc4NjJ8MA&ixlib=rb-4.1.0&q=85",
+      "delivery_van": "https://images.unsplash.com/photo-1761721941793-a580fbdb9c78?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzV8MHwxfHNlYXJjaHwyfHxjb21tZXJjaWFsJTIwZGVsaXZlcnklMjB2YW4lMjBpc29sYXRlZHxlbnwwfHx8fDE3NzYyNjc4NjJ8MA&ixlib=rb-4.1.0&q=85",
+      "logo_placeholder": "https://images.unsplash.com/photo-1614680376573-df3480f0c6ff?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzh8MHwxfHNlYXJjaHwxfHxzaW1wbGUlMjBtaW5pbWFsaXN0JTIwY29tcGFueSUyMGxvZ28lMjBpY29ufGVufDB8fHx8MTc3NjI2NzkzNHww&ixlib=rb-4.1.0&q=85"
+    }
+  },
+  "icons_library": "lucide-react",
+  "data_visualization": {
+    "library": "recharts",
+    "guidelines": "Minimalist charts. Hide axis lines where possible. Use #111111 for main lines, and semantic colors (green/red) only when indicating positive/negative performance. Sparklines in KPI cards should be simple stroke lines with no fill."
+  },
+  "instructions_to_main_agent": [
+    "Strictly enforce light mode. Do not add any dark mode toggle or styles.",
+    "Use a layout with a fixed left sidebar (w-64) and a main content area with sticky header.",
+    "Implement 8 KPI Cards at the top using a 4-column grid on large screens. Each card must have a main value, % variation badge, and a mini sparkline.",
+    "Implement the Advanced Fleet Table with filters, search, and efficiency progress bars.",
+    "Implement an AI Insights block that highlights automated recommendations (e.g. '3 vehicles consuming abnormally').",
+    "Implement Driver Behavior Analysis and Fleet Utilization blocks using Recharts.",
+    "Use standard Tailwind classes for styling following the Swiss & High-Contrast archetype.",
+    "Ensure all interactive elements have data-testid attributes."
+  ]
+}

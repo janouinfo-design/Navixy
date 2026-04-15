@@ -1,140 +1,102 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-app: #F7F7F8;
+  --bg-card: #FFFFFF;
+  --bg-header: rgba(255,255,255,0.8);
+  --text-primary: #111111;
+  --text-secondary: #5E5E62;
+  --text-tertiary: #8A8A8E;
+  --border-default: rgba(17,17,17,0.08);
+  --accent-success: #10B981;
+  --accent-warning: #F59E0B;
+  --accent-danger: #EF4444;
+  --accent-info: #3B82F6;
+  --font-heading: 'Outfit', sans-serif;
+  --font-body: 'Inter', sans-serif;
+}
+
+* {
+  font-family: var(--font-body);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+}
+
+body {
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
 .App {
   height: 100%;
 }
 
-/* Navixy-style colors */
-:root {
-  --navixy-red: #e53935;
-  --navixy-red-dark: #c62828;
-  --navixy-red-light: #ffebee;
-  --navixy-gray: #f5f5f5;
-  --navixy-gray-dark: #616161;
-  --navixy-border: #e0e0e0;
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
 }
 
-/* Button styles */
-.btn-primary {
-  background-color: var(--navixy-red);
-  color: white;
-  padding: 0.5rem 1rem;
-  border-radius: 0.5rem;
-  font-weight: 500;
-  transition: background-color 0.2s;
+/* Premium card hover */
+.kpi-card {
+  transition: all 0.2s ease;
+  border: 1px solid rgba(17,17,17,0.08);
+}
+.kpi-card:hover {
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  border-color: rgba(17,17,17,0.12);
 }
 
-.btn-primary:hover {
-  background-color: var(--navixy-red-dark);
+/* Glassmorphism header */
+.glass-header {
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  background: rgba(255,255,255,0.8);
+  border-bottom: 1px solid rgba(17,17,17,0.08);
 }
 
-/* Efficiency badge */
-.efficiency-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 2rem;
-  height: 2rem;
-  border-radius: 0.25rem;
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: white;
+/* Insight card animation */
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.insight-item {
+  animation: slideIn 0.3s ease forwards;
+}
+.insight-item:nth-child(2) { animation-delay: 0.1s; }
+.insight-item:nth-child(3) { animation-delay: 0.2s; }
+.insight-item:nth-child(4) { animation-delay: 0.3s; }
+.insight-item:nth-child(5) { animation-delay: 0.4s; }
+
+/* Pulse dot for live indicators */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
 }
 
-.efficiency-badge.high {
-  background-color: #4caf50;
+/* Table row hover */
+.fleet-row {
+  transition: background-color 0.15s ease;
 }
-
-.efficiency-badge.medium {
-  background-color: #ff9800;
-}
-
-.efficiency-badge.low {
-  background-color: #e53935;
-}
-
-/* Timeline bar */
-.timeline-bar {
-  height: 2rem;
-  background-color: #f5f5f5;
-  border-radius: 0.25rem;
-  overflow: hidden;
-  position: relative;
-}
-
-.timeline-segment {
-  position: absolute;
-  top: 0;
-  height: 100%;
-}
-
-.timeline-segment.driving {
-  background-color: #4caf50;
-}
-
-.timeline-segment.idle {
-  background-color: #ff9800;
-}
-
-.timeline-segment.stopped {
-  background-color: #e0e0e0;
-}
-
-/* Flow editor */
-.flow-editor {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  background-color: #fafafa;
-  background-image: radial-gradient(circle, #ddd 1px, transparent 1px);
-  background-size: 20px 20px;
-}
-
-.flow-node {
-  position: absolute;
-  background: white;
-  border: 2px solid #e0e0e0;
-  border-radius: 0.5rem;
-  padding: 0.75rem;
-  min-width: 160px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  cursor: grab;
-}
-
-.flow-node:active {
-  cursor: grabbing;
-}
-
-.flow-node.selected {
-  border-color: var(--navixy-red);
-  box-shadow: 0 0 0 2px rgba(229, 57, 53, 0.2);
-}
-
-.flow-connection {
-  stroke: #9e9e9e;
-  stroke-width: 2;
-  fill: none;
-}
-
-/* Node type colors */
-.node-data-source {
-  border-left: 4px solid #2196f3;
-}
-
-.node-output {
-  border-left: 4px solid #4caf50;
-}
-
-.node-logic {
-  border-left: 4px solid #ff9800;
-}
-
-.node-webhook {
-  border-left: 4px solid #e53935;
-}
-
-.node-attribute {
-  border-left: 4px solid #9c27b0;
-}
-
-.node-device-action {
-  border-left: 4px solid #ff5722;
+.fleet-row:hover {
+  background-color: #FAFAFA;
 }

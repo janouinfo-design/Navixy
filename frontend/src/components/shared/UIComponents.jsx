@@ -1,5 +1,6 @@
+import { useState } from "react";
 import {
-  ArrowUpRight, ArrowDownRight, Minus
+  ArrowUpRight, ArrowDownRight, Minus, X, Info
 } from "lucide-react";
 import { LineChart, Line, ResponsiveContainer } from "recharts";
 import { getScoreBg } from "@/lib/metrics";
@@ -17,38 +18,84 @@ export const Sparkline = ({ data, color = "#111", height = 32, width = 80 }) => 
 };
 
 // ============ KPI CARD ============
-export const KPICard = ({ label, value, unit, icon: Icon, trend, trendLabel, sparkData, sparkColor, status, subtitle }) => {
+export const KPICard = ({ label, value, unit, icon: Icon, trend, trendLabel, sparkData, sparkColor, status, subtitle, explanation }) => {
+  const [showExplanation, setShowExplanation] = useState(false);
   const TrendIcon = trend > 0 ? ArrowUpRight : trend < 0 ? ArrowDownRight : Minus;
   const trendColor = trend > 0 ? 'text-emerald-600' : trend < 0 ? 'text-red-500' : 'text-gray-400';
 
   return (
-    <div className="kpi-card bg-white rounded-xl p-5 flex flex-col justify-between min-h-[130px]" data-testid={`kpi-${label.toLowerCase().replace(/\s+/g, '-')}`}>
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-lg bg-gray-50"><Icon size={14} className="text-gray-500" /></div>
-          <span className="text-[10px] font-medium text-gray-400 uppercase tracking-wider">{label}</span>
-        </div>
-        {status && (
-          <div className={`w-2 h-2 rounded-full pulse-dot ${
-            status === 'good' ? 'bg-emerald-500' : status === 'warning' ? 'bg-amber-500' : 'bg-red-500'
-          }`} />
-        )}
-      </div>
-      <div className="flex items-end justify-between mt-2">
-        <div>
-          <div className="text-2xl font-semibold tracking-tight" style={{ fontFamily: 'Outfit, sans-serif' }}>
-            {value}{unit && <span className="text-sm font-normal text-gray-400 ml-1">{unit}</span>}
+    <div className="relative">
+      <div
+        className={`kpi-card bg-white rounded-xl p-5 flex flex-col justify-between min-h-[130px] ${explanation ? 'cursor-pointer' : ''}`}
+        data-testid={`kpi-${label.toLowerCase().replace(/\s+/g, '-')}`}
+        onClick={() => explanation && setShowExplanation(!showExplanation)}
+      >
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 rounded-lg bg-gray-50"><Icon size={14} className="text-gray-500" /></div>
+            <span className="text-[10px] font-medium text-gray-400 uppercase tracking-wider">{label}</span>
+            {explanation && <Info size={10} className="text-gray-300" />}
           </div>
-          {subtitle && <div className="text-[10px] text-gray-400 mt-0.5">{subtitle}</div>}
-          {trend !== undefined && trend !== null && (
-            <div className={`flex items-center gap-1 mt-0.5 text-[11px] font-medium ${trendColor}`}>
-              <TrendIcon size={11} /><span>{Math.abs(trend)}%</span>
-              {trendLabel && <span className="text-gray-400 font-normal">{trendLabel}</span>}
+          {status && (
+            <div className={`w-2 h-2 rounded-full pulse-dot ${
+              status === 'good' ? 'bg-emerald-500' : status === 'warning' ? 'bg-amber-500' : 'bg-red-500'
+            }`} />
+          )}
+        </div>
+        <div className="flex items-end justify-between mt-2">
+          <div>
+            <div className="text-2xl font-semibold tracking-tight" style={{ fontFamily: 'Outfit, sans-serif' }}>
+              {value}{unit && <span className="text-sm font-normal text-gray-400 ml-1">{unit}</span>}
+            </div>
+            {subtitle && <div className="text-[10px] text-gray-400 mt-0.5">{subtitle}</div>}
+            {trend !== undefined && trend !== null && (
+              <div className={`flex items-center gap-1 mt-0.5 text-[11px] font-medium ${trendColor}`}>
+                <TrendIcon size={11} /><span>{Math.abs(trend)}%</span>
+                {trendLabel && <span className="text-gray-400 font-normal">{trendLabel}</span>}
+              </div>
+            )}
+          </div>
+          {sparkData && sparkData.length > 1 && <Sparkline data={sparkData} color={sparkColor || '#111'} />}
+        </div>
+      </div>
+
+      {/* Explanation popup */}
+      {showExplanation && explanation && (
+        <div className="absolute top-full left-0 right-0 mt-2 z-50 bg-white rounded-xl border border-gray-200 shadow-lg p-4 animate-in fade-in" data-testid="kpi-explanation">
+          <div className="flex items-start justify-between mb-2">
+            <h4 className="text-sm font-semibold text-gray-800" style={{ fontFamily: 'Outfit, sans-serif' }}>{explanation.title}</h4>
+            <button onClick={(e) => { e.stopPropagation(); setShowExplanation(false); }} className="p-1 hover:bg-gray-100 rounded-lg">
+              <X size={14} className="text-gray-400" />
+            </button>
+          </div>
+          <p className="text-xs text-gray-600 leading-relaxed">{explanation.description}</p>
+          {explanation.formula && (
+            <div className="mt-2 p-2 bg-gray-50 rounded-lg">
+              <div className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">Formule</div>
+              <div className="text-xs font-mono text-gray-700">{explanation.formula}</div>
+            </div>
+          )}
+          {explanation.breakdown && (
+            <div className="mt-2 space-y-1.5">
+              <div className="text-[10px] text-gray-400 uppercase tracking-wider">Composition</div>
+              {explanation.breakdown.map((item, idx) => (
+                <div key={idx} className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5">
+                    <div className={`w-2 h-2 rounded-full ${item.color}`} />
+                    <span className="text-gray-600">{item.label}</span>
+                  </div>
+                  <span className="font-medium text-gray-800">{item.value}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {explanation.tip && (
+            <div className="mt-2 p-2 bg-blue-50 rounded-lg border border-blue-100">
+              <div className="text-[10px] text-blue-700">{explanation.tip}</div>
             </div>
           )}
         </div>
-        {sparkData && sparkData.length > 1 && <Sparkline data={sparkData} color={sparkColor || '#111'} />}
-      </div>
+      )}
     </div>
   );
 };

@@ -205,20 +205,90 @@ export const DashboardView = ({ onMenuClick }) => {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" data-testid="kpi-grid">
           <KPICard label="Score Flotte" value={summary.fleetScore} unit="%" icon={Gauge}
             status={summary.fleetScore >= 60 ? 'good' : summary.fleetScore >= 40 ? 'warning' : 'danger'}
-            sparkData={effSparkData} sparkColor={summary.fleetScore >= 60 ? '#10B981' : '#EF4444'} trend={3.2} trendLabel="vs sem." />
+            sparkData={effSparkData} sparkColor={summary.fleetScore >= 60 ? '#10B981' : '#EF4444'} trend={3.2} trendLabel="vs sem."
+            explanation={{
+              title: 'Score Flotte Global',
+              description: 'Le score flotte mesure la performance globale de vos vehicules sur la periode selectionnee. Il combine plusieurs facteurs cles pour donner une vue d\'ensemble.',
+              formula: 'Efficacite (30%) + Anti-ralenti (25%) + Securite (20%) + Eco-conduite (15%) + Activite (10%)',
+              breakdown: [
+                { label: 'Efficacite (temps conduite vs arret)', value: `${summary.fleetScore >= 50 ? 'Correct' : 'A ameliorer'}`, color: summary.fleetScore >= 50 ? 'bg-emerald-500' : 'bg-red-500' },
+                { label: 'Anti-ralenti (moteur tourne sans rouler)', value: `${summary.totalIdleH}h`, color: parseFloat(summary.totalIdleH) > 50 ? 'bg-amber-500' : 'bg-emerald-500' },
+                { label: 'Securite (exces de vitesse)', value: `${summary.violations} violations`, color: summary.violations > 5 ? 'bg-red-500' : 'bg-emerald-500' },
+                { label: 'Eco-conduite (consommation)', value: `${summary.avgFuelEff} L/100`, color: parseFloat(summary.avgFuelEff) > 10 ? 'bg-amber-500' : 'bg-emerald-500' },
+                { label: 'Activite (vehicules utilises)', value: `${summary.active}/${summary.total}`, color: 'bg-blue-500' },
+              ],
+              tip: 'Un score > 70% est excellent. Entre 40-70% il y a des marges d\'amelioration. Sous 40% une action corrective est recommandee.'
+            }} />
           <KPICard label="Vehicules actifs" value={`${summary.active}`} unit={`/ ${summary.total}`} icon={Truck}
-            status={summary.active > 0 ? 'good' : 'danger'} subtitle={`${summary.offline} offline`} />
+            status={summary.active > 0 ? 'good' : 'danger'} subtitle={`${summary.offline} offline`}
+            explanation={{
+              title: 'Vehicules Actifs',
+              description: 'Nombre de vehicules ayant une connexion GPS active en ce moment. Les vehicules offline peuvent avoir un probleme de tracker ou etre simplement stationnes sans alimentation.',
+              breakdown: [
+                { label: 'Actifs (GPS connecte)', value: summary.active, color: 'bg-emerald-500' },
+                { label: 'Offline (pas de signal)', value: summary.offline, color: 'bg-gray-400' },
+              ],
+              tip: 'Si un vehicule est offline depuis plus de 24h, verifiez l\'alimentation du tracker GPS et la couverture reseau.'
+            }} />
           <KPICard label="Distance totale" value={summary.totalKm.toFixed(0)} unit="km" icon={MapPin}
-            sparkData={distSparkData} sparkColor="#111" trend={8.7} trendLabel="vs sem." />
+            sparkData={distSparkData} sparkColor="#111" trend={8.7} trendLabel="vs sem."
+            explanation={{
+              title: 'Distance Totale',
+              description: 'Distance cumulee parcourue par tous les vehicules de la flotte sur la periode selectionnee. Calculee via l\'API Navixy tracker/stats/mileage.',
+              tip: 'Comparez cette valeur d\'une semaine a l\'autre pour detecter des baisses d\'activite ou des pics inhabituels.'
+            }} />
           <KPICard label="Conso. moyenne" value={summary.avgFuelEff} unit="L/100km" icon={Fuel}
-            sparkData={fuelSparkData} sparkColor="#F59E0B" trend={-2.3} trendLabel="vs sem." />
+            sparkData={fuelSparkData} sparkColor="#F59E0B" trend={-2.3} trendLabel="vs sem."
+            explanation={{
+              title: 'Consommation Moyenne',
+              description: 'Consommation moyenne de carburant en litres pour 100 km, calculee sur l\'ensemble de la flotte. La reference est de 8.5 L/100km.',
+              formula: '(Carburant total / Distance totale) x 100',
+              breakdown: [
+                { label: 'Excellent', value: '< 7 L/100', color: 'bg-emerald-500' },
+                { label: 'Normal', value: '7-10 L/100', color: 'bg-amber-500' },
+                { label: 'Eleve', value: '> 10 L/100', color: 'bg-red-500' },
+              ],
+              tip: 'Une consommation elevee peut indiquer: pression pneus basse, conduite agressive, chargement excessif, ou probleme mecanique.'
+            }} />
           <KPICard label="Cout carburant" value={summary.totalFuelCost.toLocaleString('fr-FR')} unit="CHF" icon={DollarSign}
-            subtitle={`${summary.totalFuelL.toFixed(0)} litres a ${FUEL_PRICE_CHF} CHF/L`} />
+            subtitle={`${summary.totalFuelL.toFixed(0)} litres a ${FUEL_PRICE_CHF} CHF/L`}
+            explanation={{
+              title: 'Cout Carburant',
+              description: `Cout total estime du carburant consomme par la flotte. Base sur le prix configure de ${FUEL_PRICE_CHF} CHF/litre.`,
+              formula: `Litres consommes x ${FUEL_PRICE_CHF} CHF/L`,
+              tip: 'Ce cout peut etre reduit en diminuant le ralenti excessif et en formant les conducteurs a l\'eco-conduite.'
+            }} />
           <KPICard label="Temps ralenti" value={summary.totalIdleH} unit="h" icon={Clock}
-            status={parseFloat(summary.totalIdleH) > 50 ? 'warning' : 'good'} subtitle={`~${summary.idleCostEstimate} CHF de perte`} />
+            status={parseFloat(summary.totalIdleH) > 50 ? 'warning' : 'good'} subtitle={`~${summary.idleCostEstimate} CHF de perte`}
+            explanation={{
+              title: 'Temps Ralenti',
+              description: 'Temps total ou le moteur tourne alors que le vehicule est a l\'arret (vitesse < 5 km/h). C\'est du carburant brule inutilement.',
+              formula: `Cout = Heures ralenti x 1.5 L/h x ${FUEL_PRICE_CHF} CHF/L`,
+              breakdown: [
+                { label: 'Heures ralenti total', value: `${summary.totalIdleH}h`, color: 'bg-amber-500' },
+                { label: 'Perte estimee', value: `${summary.idleCostEstimate} CHF`, color: 'bg-red-500' },
+              ],
+              tip: 'Le ralenti represente souvent 10-30% de la consommation totale. Sensibilisez les conducteurs a couper le moteur lors des arrets prolonges.'
+            }} />
           <KPICard label="Alertes" value={summary.alertCount} icon={AlertTriangle}
-            status={summary.alertCount === 0 ? 'good' : summary.alertCount <= 5 ? 'warning' : 'danger'} subtitle={`${summary.violations} exces vitesse`} />
-          <KPICard label="Heures moteur" value={summary.totalEngineH.toFixed(0)} unit="h" icon={Activity} trend={-1.5} trendLabel="vs sem." />
+            status={summary.alertCount === 0 ? 'good' : summary.alertCount <= 5 ? 'warning' : 'danger'} subtitle={`${summary.violations} exces vitesse`}
+            explanation={{
+              title: 'Alertes Actives',
+              description: 'Nombre total d\'alertes: vehicules avec efficacite < 50% + vehicules offline + exces de vitesse detectes.',
+              breakdown: [
+                { label: 'Vehicules inefficaces (<50%)', value: compVehicles.filter(v => (v.efficiency_score || 0) < 50).length, color: 'bg-red-500' },
+                { label: 'Vehicules offline', value: summary.offline, color: 'bg-gray-500' },
+                { label: 'Exces de vitesse', value: summary.violations, color: 'bg-amber-500' },
+              ],
+              tip: 'Traitez les alertes rouges en priorite: vehicules inefficaces et violations de vitesse repetees.'
+            }} />
+          <KPICard label="Heures moteur" value={summary.totalEngineH.toFixed(0)} unit="h" icon={Activity} trend={-1.5} trendLabel="vs sem."
+            explanation={{
+              title: 'Heures Moteur',
+              description: 'Temps total de fonctionnement des moteurs de tous les vehicules. Inclut le temps de conduite ET le temps de ralenti.',
+              formula: 'Heures moteur = Temps conduite + Temps ralenti',
+              tip: 'Comparez les heures moteur avec la distance parcourue. Un ratio eleve (beaucoup d\'heures, peu de km) indique un ralenti excessif.'
+            }} />
         </div>
 
         {/* Insights + Risk */}

@@ -479,12 +479,14 @@ async def get_fleet_stats(
 
 @api_router.get("/fleet/efficiency")
 async def get_fleet_efficiency(
+    request: Request,
     date: str = Query(..., description="Date YYYY-MM-DD"),
     period: str = Query("day", description="day, week, or month")
 ):
     """Get fleet efficiency report similar to Navixy UI"""
+    navixy_hash = await get_navixy_hash_from_request(request)
     # Get all trackers
-    trackers_data = await navixy_request("tracker/list")
+    trackers_data = await navixy_request("tracker/list", navixy_hash=navixy_hash)
     if not trackers_data.get('success'):
         raise HTTPException(status_code=400, detail="Failed to fetch trackers")
     
@@ -497,7 +499,7 @@ async def get_fleet_efficiency(
         tracker_id = tracker['id']
         
         # Get state
-        state_data = await navixy_request("tracker/get_state", {"tracker_id": tracker_id})
+        state_data = await navixy_request("tracker/get_state", {"tracker_id": tracker_id}, navixy_hash=navixy_hash)
         
         state = state_data.get('state', {}) if state_data.get('success') else {}
         gps = state.get('gps', {})
@@ -553,18 +555,20 @@ async def get_fleet_efficiency(
 
 @api_router.get("/reports/driver")
 async def get_driver_report(
+    request: Request,
     from_date: str = Query(..., description="Start date YYYY-MM-DD"),
     to_date: str = Query(..., description="End date YYYY-MM-DD"),
     employee_id: Optional[int] = Query(None, description="Specific employee ID")
 ):
     """Get driver-centric report: which vehicles did each driver use"""
+    navixy_hash = await get_navixy_hash_from_request(request)
     # Get employees
-    employees_data = await navixy_request("employee/list")
+    employees_data = await navixy_request("employee/list", navixy_hash=navixy_hash)
     if not employees_data.get('success'):
         raise HTTPException(status_code=400, detail="Failed to fetch employees")
     
     # Get trackers for reference
-    trackers_data = await navixy_request("tracker/list")
+    trackers_data = await navixy_request("tracker/list", navixy_hash=navixy_hash)
     trackers_map = {}
     if trackers_data.get('success'):
         for t in trackers_data.get('list', []):
@@ -583,7 +587,7 @@ async def get_driver_report(
             "driver_id": employee['id'],
             "from": f"{from_date} 00:00:00",
             "to": f"{to_date} 23:59:59"
-        })
+        }, navixy_hash=navixy_hash)
         
         vehicles_used = []
         total_distance = 0
@@ -710,13 +714,14 @@ async def export_flow(flow_id: str):
 
 @api_router.get("/export/fleet-stats")
 async def export_fleet_stats(
+    request: Request,
     from_date: str = Query(...),
     to_date: str = Query(...),
     format: str = Query("csv", description="csv or json")
 ):
     """Export fleet statistics as CSV or JSON"""
     try:
-        stats = await get_fleet_stats(from_date, to_date, None)
+        stats = await get_fleet_stats(request, from_date, to_date, None)
     except Exception as e:
         logger.error(f"Error getting fleet stats for export: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch fleet stats: {str(e)}")
@@ -757,12 +762,13 @@ async def export_fleet_stats(
 
 @api_router.get("/export/driver-report")
 async def export_driver_report(
+    request: Request,
     from_date: str = Query(...),
     to_date: str = Query(...),
     format: str = Query("csv")
 ):
     """Export driver report as CSV or JSON"""
-    report = await get_driver_report(from_date, to_date)
+    report = await get_driver_report(request, from_date, to_date)
     
     if format == "json":
         json_content = json.dumps(report, indent=2, default=str)
@@ -802,9 +808,10 @@ async def export_driver_report(
 # ============ REAL-TIME GPS POSITIONS ============
 
 @api_router.get("/map/positions")
-async def get_all_positions():
+async def get_all_positions(request: Request):
     """Get current GPS positions for all trackers"""
-    trackers_data = await navixy_request("tracker/list")
+    navixy_hash = await get_navixy_hash_from_request(request)
+    trackers_data = await navixy_request("tracker/list", navixy_hash=navixy_hash)
     if not trackers_data.get('success'):
         raise HTTPException(status_code=400, detail="Failed to fetch trackers")
     
@@ -814,7 +821,7 @@ async def get_all_positions():
         tracker_id = tracker['id']
         
         # Get current state with GPS position
-        state_data = await navixy_request("tracker/get_state", {"tracker_id": tracker_id})
+        state_data = await navixy_request("tracker/get_state", {"tracker_id": tracker_id}, navixy_hash=navixy_hash)
         
         if state_data.get('success'):
             state = state_data.get('state', {})
@@ -871,10 +878,12 @@ async def get_tracker_position(tracker_id: int):
 
 @api_router.get("/analytics/trends")
 async def get_fleet_trends(
+    request: Request,
     period: str = Query("week", description="week or month"),
     tracker_id: Optional[int] = Query(None, description="Specific tracker ID")
 ):
     """Get fleet efficiency trends over time"""
+    navixy_hash = await get_navixy_hash_from_request(request)
     import random
     
     # Calculate date range
@@ -885,7 +894,7 @@ async def get_fleet_trends(
         days = 30
     
     # Get trackers
-    trackers_data = await navixy_request("tracker/list")
+    trackers_data = await navixy_request("tracker/list", navixy_hash=navixy_hash)
     if not trackers_data.get('success'):
         raise HTTPException(status_code=400, detail="Failed to fetch trackers")
     
@@ -970,9 +979,10 @@ async def get_fleet_trends(
     }
 
 @api_router.get("/analytics/vehicle-comparison")
-async def get_vehicle_comparison():
+async def get_vehicle_comparison(request: Request):
     """Compare efficiency across all vehicles"""
-    trackers_data = await navixy_request("tracker/list")
+    navixy_hash = await get_navixy_hash_from_request(request)
+    trackers_data = await navixy_request("tracker/list", navixy_hash=navixy_hash)
     if not trackers_data.get('success'):
         raise HTTPException(status_code=400, detail="Failed to fetch trackers")
     
@@ -981,7 +991,7 @@ async def get_vehicle_comparison():
     comparison = []
     for tracker in trackers_data.get('list', []):
         # Get current state
-        state_data = await navixy_request("tracker/get_state", {"tracker_id": tracker['id']})
+        state_data = await navixy_request("tracker/get_state", {"tracker_id": tracker['id']}, navixy_hash=navixy_hash)
         
         is_active = False
         if state_data.get('success'):

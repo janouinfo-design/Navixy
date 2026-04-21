@@ -5,7 +5,7 @@ import { PeriodSelector } from "@/components/shared/PeriodSelector";
 import {
   Users, Truck, Download, RefreshCw, ChevronRight, ChevronDown,
   Phone, Award, AlertTriangle, Clock, Fuel, ShieldAlert,
-  TrendingUp, MapPin, Gauge, DollarSign, Activity, Star, X
+  TrendingUp, MapPin, Gauge, DollarSign, Activity, Star, X, Info
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -14,6 +14,66 @@ import {
 } from "recharts";
 
 const FUEL_PRICE = 2.0;
+
+// ============ DRIVER KPI WITH INFO POPUP ============
+const DriverKPI = ({ label, value, icon: Icon, color, explanation }) => {
+  const [showInfo, setShowInfo] = useState(false);
+  return (
+    <div className="relative">
+      <div className="kpi-card bg-white rounded-xl p-5 min-h-[100px] flex flex-col justify-between">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <Icon size={13} className="text-gray-400" />
+            <span className="text-[10px] font-medium text-gray-400 uppercase tracking-wider">{label}</span>
+          </div>
+          {explanation && (
+            <button onClick={() => setShowInfo(!showInfo)} className="p-1 hover:bg-gray-100 rounded-lg transition-colors" data-testid={`info-${label.toLowerCase().replace(/\s+/g, '-')}`}>
+              <Info size={13} className={showInfo ? 'text-[#111]' : 'text-gray-300 hover:text-gray-500'} />
+            </button>
+          )}
+        </div>
+        <div className={`text-2xl font-semibold tracking-tight ${color || 'text-gray-900'}`} style={{ fontFamily: 'Outfit, sans-serif' }}>
+          {value}
+        </div>
+      </div>
+
+      {showInfo && explanation && (
+        <div className="absolute top-full left-0 right-0 mt-2 z-50 bg-white rounded-xl border border-gray-200 shadow-lg p-4" data-testid="kpi-info-popup">
+          <div className="flex items-start justify-between mb-2">
+            <h4 className="text-sm font-semibold text-gray-800" style={{ fontFamily: 'Outfit, sans-serif' }}>{explanation.title}</h4>
+            <button onClick={() => setShowInfo(false)} className="p-1 hover:bg-gray-100 rounded-lg"><X size={14} className="text-gray-400" /></button>
+          </div>
+          <p className="text-xs text-gray-600 leading-relaxed">{explanation.description}</p>
+          {explanation.formula && (
+            <div className="mt-2 p-2 bg-gray-50 rounded-lg">
+              <div className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">Formule</div>
+              <div className="text-xs font-mono text-gray-700">{explanation.formula}</div>
+            </div>
+          )}
+          {explanation.breakdown && (
+            <div className="mt-2 space-y-1.5">
+              <div className="text-[10px] text-gray-400 uppercase tracking-wider">Niveaux</div>
+              {explanation.breakdown.map((item, idx) => (
+                <div key={idx} className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5">
+                    <div className={`w-2 h-2 rounded-full ${item.color}`} />
+                    <span className="text-gray-600">{item.label}</span>
+                  </div>
+                  <span className="font-medium text-gray-800">{item.value}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {explanation.tip && (
+            <div className="mt-2 p-2 bg-blue-50 rounded-lg border border-blue-100">
+              <div className="text-[10px] text-blue-700">{explanation.tip}</div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 
 // ============ DRIVER SCORE CALCULATION ============
 const calcDriverScore = (driver, compVehicles) => {
@@ -288,22 +348,49 @@ export const DriverReportView = ({ onMenuClick }) => {
         {/* KPI Row */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           {[
-            { label: 'Conducteurs', value: totalDrivers, icon: Users },
-            { label: 'Score moyen', value: `${avgScore}%`, icon: Gauge, color: avgScore >= 50 ? 'text-emerald-600' : 'text-red-500' },
-            { label: 'Excellents', value: excellentDrivers, icon: Star, color: 'text-emerald-600' },
-            { label: 'A risque', value: driversAtRisk, icon: AlertTriangle, color: driversAtRisk > 0 ? 'text-red-500' : 'text-gray-400' },
-            { label: 'Ralenti moyen', value: `${avgIdle}%`, icon: Clock, color: avgIdle > 20 ? 'text-amber-600' : 'text-gray-700' },
-            { label: 'Violations totales', value: totalViolations, icon: ShieldAlert, color: totalViolations > 0 ? 'text-red-500' : 'text-gray-700' },
+            { label: 'Conducteurs', value: totalDrivers, icon: Users, explanation: {
+              title: 'Nombre de Conducteurs',
+              description: 'Nombre total de conducteurs enregistres dans le systeme Navixy pour cette flotte.',
+              tip: 'Chaque conducteur est associe a un ou plusieurs vehicules via le systeme d\'identification (cle iButton, carte RFID, ou assignation manuelle).'
+            }},
+            { label: 'Score moyen', value: `${avgScore}%`, icon: Gauge, color: avgScore >= 50 ? 'text-emerald-600' : 'text-red-500', explanation: {
+              title: 'Score Moyen Conducteurs',
+              description: 'Moyenne des scores de performance de tous les conducteurs. Le score combine efficacite, ralenti, violations et consommation.',
+              formula: 'Efficacite (40%) + Anti-ralenti (25%) + Securite (20%) + Eco-conduite (15%)',
+              breakdown: [
+                { label: 'Excellent', value: '> 70%', color: 'bg-emerald-500' },
+                { label: 'Acceptable', value: '40-70%', color: 'bg-amber-500' },
+                { label: 'A ameliorer', value: '< 40%', color: 'bg-red-500' },
+              ],
+              tip: 'Un score moyen < 50% indique un besoin de formation eco-conduite pour l\'ensemble de la flotte.'
+            }},
+            { label: 'Excellents', value: excellentDrivers, icon: Star, color: 'text-emerald-600', explanation: {
+              title: 'Conducteurs Excellents',
+              description: `Nombre de conducteurs avec un score superieur a 70%. Actuellement ${excellentDrivers} sur ${totalDrivers}.`,
+              tip: 'Ces conducteurs sont vos references. Utilisez leurs pratiques comme modele pour former les autres.'
+            }},
+            { label: 'A risque', value: driversAtRisk, icon: AlertTriangle, color: driversAtRisk > 0 ? 'text-red-500' : 'text-gray-400', explanation: {
+              title: 'Conducteurs a Risque',
+              description: `Conducteurs avec un score inferieur a 40%. Ils cumulent souvent: exces de vitesse, ralenti excessif, et surconsommation.`,
+              tip: driversAtRisk > 0 ? `Action urgente: ${driversAtRisk} conducteur${driversAtRisk > 1 ? 's' : ''} necessite${driversAtRisk > 1 ? 'nt' : ''} une formation ou un entretien individuel.` : 'Aucun conducteur a risque — tres bien!'
+            }},
+            { label: 'Ralenti moyen', value: `${avgIdle}%`, icon: Clock, color: avgIdle > 20 ? 'text-amber-600' : 'text-gray-700', explanation: {
+              title: 'Ralenti Moyen',
+              description: 'Pourcentage moyen du temps ou le moteur tourne alors que le vehicule est a l\'arret (vitesse < 5 km/h).',
+              breakdown: [
+                { label: 'Normal', value: '< 15%', color: 'bg-emerald-500' },
+                { label: 'Eleve', value: '15-25%', color: 'bg-amber-500' },
+                { label: 'Excessif', value: '> 25%', color: 'bg-red-500' },
+              ],
+              tip: 'Chaque heure de ralenti coute environ 3 CHF en carburant. Sensibilisez les conducteurs a couper le moteur lors des arrets de plus de 30 secondes.'
+            }},
+            { label: 'Violations totales', value: totalViolations, icon: ShieldAlert, color: totalViolations > 0 ? 'text-red-500' : 'text-gray-700', explanation: {
+              title: 'Violations Totales',
+              description: `Nombre total d'exces de vitesse detectes sur la periode pour l'ensemble des conducteurs: ${totalViolations} violations.`,
+              tip: totalViolations > 10 ? 'Nombre eleve de violations. Envisagez une campagne de sensibilisation a la securite routiere et des formations eco-conduite.' : 'Niveau acceptable. Continuez a monitorer regulierement.'
+            }},
           ].map((item, idx) => (
-            <div key={idx} className="kpi-card bg-white rounded-xl p-5 min-h-[100px] flex flex-col justify-between">
-              <div className="flex items-center gap-1.5">
-                <item.icon size={13} className="text-gray-400" />
-                <span className="text-[10px] font-medium text-gray-400 uppercase tracking-wider">{item.label}</span>
-              </div>
-              <div className={`text-2xl font-semibold tracking-tight ${item.color || 'text-gray-900'}`} style={{ fontFamily: 'Outfit, sans-serif' }}>
-                {item.value}
-              </div>
-            </div>
+            <DriverKPI key={idx} {...item} />
           ))}
         </div>
 

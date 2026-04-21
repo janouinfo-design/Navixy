@@ -2,13 +2,50 @@ import { useState, useEffect, useCallback } from "react";
 import { API, api } from "@/lib/api";
 import { Header } from "@/components/layout/Header";
 import {
-  MapPin, Gauge, Fuel, AlertTriangle, Target, RefreshCw
+  MapPin, Gauge, Fuel, AlertTriangle, Target, RefreshCw, Info, X
 } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell
 } from "recharts";
+
+// ============ TREND KPI WITH INFO ============
+const TrendKPI = ({ label, value, icon: Icon, color, explanation }) => {
+  const [showInfo, setShowInfo] = useState(false);
+  return (
+    <div className="relative">
+      <div className="kpi-card bg-white rounded-xl p-5">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <Icon size={14} className="text-gray-400" />
+            <span className="text-[10px] font-medium text-gray-400 uppercase tracking-wider">{label}</span>
+          </div>
+          {explanation && (
+            <button onClick={() => setShowInfo(!showInfo)} className="p-1 hover:bg-gray-100 rounded-lg transition-colors">
+              <Info size={13} className={showInfo ? 'text-[#111]' : 'text-gray-300 hover:text-gray-500'} />
+            </button>
+          )}
+        </div>
+        <div className={`text-xl font-semibold ${color}`} style={{ fontFamily: 'Outfit, sans-serif' }}>{value}</div>
+      </div>
+      {showInfo && explanation && (
+        <div className="absolute top-full left-0 right-0 mt-2 z-50 bg-white rounded-xl border border-gray-200 shadow-lg p-4 min-w-[250px]">
+          <div className="flex items-start justify-between mb-2">
+            <h4 className="text-sm font-semibold text-gray-800" style={{ fontFamily: 'Outfit, sans-serif' }}>{explanation.title}</h4>
+            <button onClick={() => setShowInfo(false)} className="p-1 hover:bg-gray-100 rounded-lg"><X size={14} className="text-gray-400" /></button>
+          </div>
+          <p className="text-xs text-gray-600 leading-relaxed">{explanation.description}</p>
+          {explanation.tip && (
+            <div className="mt-2 p-2 bg-blue-50 rounded-lg border border-blue-100">
+              <div className="text-[10px] text-blue-700">{explanation.tip}</div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const TrendsView = ({ onMenuClick }) => {
   const [trends, setTrends] = useState(null);
@@ -63,23 +100,16 @@ export const TrendsView = ({ onMenuClick }) => {
       <div className="p-4 lg:p-8 space-y-6 max-w-[1600px] mx-auto">
         {/* Summary */}
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-          {[
-            { label: 'Distance Totale', value: `${trends?.summary?.total_distance || 0} km`, icon: MapPin, color: 'text-gray-900' },
-            { label: 'Efficacite Moy.', value: `${trends?.summary?.avg_efficiency || 0}%`, icon: Gauge, color: 'text-emerald-600' },
-            { label: 'Carburant Total', value: `${trends?.summary?.total_fuel || 0} L`, icon: Fuel, color: 'text-amber-600' },
-            { label: 'Violations', value: trends?.summary?.total_violations || 0, icon: AlertTriangle, color: 'text-red-500' },
-            { label: 'Meilleur Jour', value: trends?.summary?.best_day?.split('-').slice(1).join('/'), icon: Target, color: 'text-emerald-600' },
-          ].map((item, idx) => (
-            <div key={idx} className="kpi-card bg-white rounded-xl p-5">
-              <div className="flex items-center gap-2 mb-2">
-                <item.icon size={14} className="text-gray-400" />
-                <span className="text-[10px] font-medium text-gray-400 uppercase tracking-wider">{item.label}</span>
-              </div>
-              <div className={`text-xl font-semibold ${item.color}`} style={{ fontFamily: 'Outfit, sans-serif' }}>
-                {item.value}
-              </div>
-            </div>
-          ))}
+          <TrendKPI label="Distance Totale" value={`${trends?.summary?.total_distance || 0} km`} icon={MapPin} color="text-gray-900"
+            explanation={{ title: 'Distance Totale', description: 'Distance cumulee parcourue par tous les vehicules sur la periode selectionnee. Calculee a partir des donnees GPS Navixy.', tip: 'Comparez d\'une semaine a l\'autre pour detecter des variations d\'activite. Une baisse peut indiquer des vehicules en panne ou un changement d\'organisation.' }} />
+          <TrendKPI label="Efficacite Moy." value={`${trends?.summary?.avg_efficiency || 0}%`} icon={Gauge} color="text-emerald-600"
+            explanation={{ title: 'Efficacite Moyenne', description: 'Score moyen d\'efficacite de la flotte sur la periode. Combine le temps de conduite, le ralenti et l\'activite des vehicules.', tip: 'Un score > 60% est bon. En dessous de 40%, des actions correctives sont necessaires (formation conducteurs, optimisation itineraires).' }} />
+          <TrendKPI label="Carburant Total" value={`${trends?.summary?.total_fuel || 0} L`} icon={Fuel} color="text-amber-600"
+            explanation={{ title: 'Carburant Total', description: 'Volume total de carburant estime consomme par la flotte sur la periode. Calcule a partir de la distance et de la consommation moyenne.', tip: `Au prix de 2 CHF/L, cela represente environ ${Math.round((trends?.summary?.total_fuel || 0) * 2)} CHF. Reduire le ralenti peut economiser 10-15% du carburant.` }} />
+          <TrendKPI label="Violations" value={trends?.summary?.total_violations || 0} icon={AlertTriangle} color="text-red-500"
+            explanation={{ title: 'Violations de Vitesse', description: 'Nombre total d\'exces de vitesse detectes par les trackers GPS sur la periode. Chaque depassement de la limite configuree est compte.', tip: 'Les exces de vitesse augmentent le risque d\'accident, la consommation et l\'usure des vehicules. Identifiez les conducteurs concernes pour les former.' }} />
+          <TrendKPI label="Meilleur Jour" value={trends?.summary?.best_day?.split('-').slice(1).join('/')} icon={Target} color="text-emerald-600"
+            explanation={{ title: 'Meilleur Jour', description: 'Jour avec le score d\'efficacite le plus eleve sur la periode. C\'est le jour ou la flotte a ete la plus performante.', tip: 'Analysez ce qui a ete different ce jour-la (meteo, type de missions, conducteurs) pour reproduire ces bonnes pratiques.' }} />
         </div>
 
         {/* Charts */}

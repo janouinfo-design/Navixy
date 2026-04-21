@@ -15,21 +15,31 @@ import {
 
 const FUEL_PRICE = 2.0;
 
-// ============ KPI CARD ============
-const KPI = ({ label, value, unit, icon: Icon, color, subtitle }) => (
-  <div className="kpi-card bg-white rounded-xl p-5 min-h-[110px] flex flex-col justify-between">
-    <div className="flex items-center gap-1.5">
-      <Icon size={13} className="text-gray-400" />
-      <span className="text-[10px] font-medium text-gray-400 uppercase tracking-wider">{label}</span>
-    </div>
-    <div>
-      <div className={`text-2xl font-semibold tracking-tight ${color || 'text-gray-900'}`} style={{ fontFamily: 'Outfit, sans-serif' }}>
-        {value}{unit && <span className="text-sm font-normal text-gray-400 ml-1">{unit}</span>}
+// ============ KPI CARD (clickable) ============
+const KPI = ({ label, value, unit, icon: Icon, color, subtitle, filterKey, activeKPI, onClick }) => {
+  const isActive = activeKPI === filterKey;
+  return (
+    <div
+      onClick={() => filterKey && onClick(filterKey)}
+      className={`kpi-card bg-white rounded-xl p-5 min-h-[110px] flex flex-col justify-between transition-all ${
+        filterKey ? 'cursor-pointer' : ''
+      } ${isActive ? 'ring-2 ring-[#111] shadow-md' : ''}`}
+      data-testid={`kpi-${filterKey || label}`}
+    >
+      <div className="flex items-center gap-1.5">
+        <Icon size={13} className={isActive ? 'text-[#111]' : 'text-gray-400'} />
+        <span className={`text-[10px] font-medium uppercase tracking-wider ${isActive ? 'text-[#111]' : 'text-gray-400'}`}>{label}</span>
       </div>
-      {subtitle && <div className="text-[10px] text-gray-400 mt-0.5">{subtitle}</div>}
+      <div>
+        <div className={`text-2xl font-semibold tracking-tight ${color || 'text-gray-900'}`} style={{ fontFamily: 'Outfit, sans-serif' }}>
+          {value}{unit && <span className="text-sm font-normal text-gray-400 ml-1">{unit}</span>}
+        </div>
+        {subtitle && <div className="text-[10px] text-gray-400 mt-0.5">{subtitle}</div>}
+        {filterKey && <div className={`text-[9px] mt-1 ${isActive ? 'text-[#111] font-medium' : 'text-gray-300'}`}>{isActive ? 'Filtre actif — cliquez pour retirer' : 'Cliquez pour filtrer'}</div>}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 // ============ VEHICLE CARD (Top/Worst) ============
 const VehicleRankCard = ({ vehicle, rank, type }) => {
@@ -69,6 +79,7 @@ export const FleetEfficiencyView = ({ onMenuClick }) => {
   const [filterStatus, setFilterStatus] = useState('all');
   const [sortBy, setSortBy] = useState('mileage');
   const [sortDir, setSortDir] = useState('desc');
+  const [activeKPI, setActiveKPI] = useState(null);
 
   const fetchData = useCallback(async (from, to) => {
     setLoading(true);
@@ -119,9 +130,52 @@ export const FleetEfficiencyView = ({ onMenuClick }) => {
   const effMap = {};
   (efficiency?.vehicles || []).forEach(v => { effMap[v.tracker_id] = v; });
 
+  // Derived KPIs (must come before filtered)
+  const totalVehicles = vehicles.length;
+  const activeCount = vehicles.filter(v => v.connection_status === 'active').length;
+  const offlineCount = totalVehicles - activeCount;
+  const totalKm = stats?.summary?.total_mileage || 0;
+  const totalEngineH = stats?.summary?.total_engine_hours || 0;
+  const totalFuelCost = Math.round(totalKm * 8.5 / 100 * FUEL_PRICE);
+  const underUsedList = vehicles.filter(v => v.mileage < 10 && v.connection_status !== 'active');
+  const underUsed = underUsedList.length;
+
+  // KPI filter handler
+  const handleKPIClick = (key) => {
+    setActiveKPI(activeKPI === key ? null : key);
+    setFilterStatus('all');
+    setSearch('');
+  };
+
+  // KPI filtered vehicle lists
+  const kpiFilteredIds = (() => {
+    if (!activeKPI) return null;
+    switch (activeKPI) {
+      case 'total': return vehicles.map(v => v.tracker_id);
+      case 'active': return vehicles.filter(v => v.connection_status === 'active').map(v => v.tracker_id);
+      case 'offline': return vehicles.filter(v => v.connection_status !== 'active').map(v => v.tracker_id);
+      case 'underused': return underUsedList.map(v => v.tracker_id);
+      case 'distance': return [...vehicles].sort((a, b) => (b.mileage || 0) - (a.mileage || 0)).map(v => v.tracker_id);
+      case 'engine': return [...vehicles].sort((a, b) => (b.engine_hours || 0) - (a.engine_hours || 0)).map(v => v.tracker_id);
+      case 'fuel': return [...vehicles].sort((a, b) => (b.mileage || 0) - (a.mileage || 0)).map(v => v.tracker_id);
+      default: return null;
+    }
+  })();
+
+  const kpiFilterLabels = {
+    total: 'Tous les vehicules',
+    active: 'Vehicules actifs',
+    offline: 'Vehicules hors ligne',
+    underused: 'Vehicules sous-utilises (< 10 km)',
+    distance: 'Tries par distance',
+    engine: 'Tries par heures moteur',
+    fuel: 'Tries par cout carburant'
+  };
+
   // Filtered & sorted
   const filtered = vehicles
     .filter(v => {
+      if (kpiFilteredIds && !kpiFilteredIds.includes(v.tracker_id)) return false;
       if (search && !v.label.toLowerCase().includes(search.toLowerCase())) return false;
       if (filterStatus === 'active' && v.connection_status !== 'active') return false;
       if (filterStatus === 'offline' && v.connection_status === 'active') return false;
@@ -143,15 +197,6 @@ export const FleetEfficiencyView = ({ onMenuClick }) => {
   const sortedByScore = [...(comparison?.vehicles || [])].sort((a, b) => b.efficiency_score - a.efficiency_score);
   const topPerformers = sortedByScore.slice(0, 3);
   const worstPerformers = sortedByScore.slice(-3).reverse();
-
-  // Derived KPIs
-  const totalVehicles = vehicles.length;
-  const activeCount = vehicles.filter(v => v.connection_status === 'active').length;
-  const offlineCount = totalVehicles - activeCount;
-  const totalKm = stats?.summary?.total_mileage || 0;
-  const totalEngineH = stats?.summary?.total_engine_hours || 0;
-  const totalFuelCost = Math.round(totalKm * 8.5 / 100 * FUEL_PRICE);
-  const underUsed = vehicles.filter(v => v.mileage < 10 && v.connection_status !== 'active').length;
 
   // Consumption chart data
   const consumptionData = (comparison?.vehicles || [])
@@ -183,14 +228,25 @@ export const FleetEfficiencyView = ({ onMenuClick }) => {
       <div className="p-4 lg:p-8 space-y-6 max-w-[1600px] mx-auto">
         {/* KPI Row */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
-          <KPI label="Total vehicules" value={totalVehicles} icon={Truck} />
-          <KPI label="Actifs" value={activeCount} icon={Wifi} color="text-emerald-600" />
-          <KPI label="Hors ligne" value={offlineCount} icon={WifiOff} color={offlineCount > 0 ? 'text-red-500' : 'text-gray-400'} />
-          <KPI label="Sous-utilises" value={underUsed} icon={XCircle} color={underUsed > 0 ? 'text-amber-600' : 'text-gray-400'} subtitle="< 10 km sur la periode" />
-          <KPI label="Distance totale" value={totalKm.toFixed(0)} unit="km" icon={MapPin} />
-          <KPI label="Heures moteur" value={totalEngineH.toFixed(0)} unit="h" icon={Activity} />
-          <KPI label="Cout carburant" value={totalFuelCost.toLocaleString('fr-FR')} unit="CHF" icon={DollarSign} subtitle={`~8.5 L/100 x ${FUEL_PRICE} CHF/L`} />
+          <KPI label="Total vehicules" value={totalVehicles} icon={Truck} filterKey="total" activeKPI={activeKPI} onClick={handleKPIClick} />
+          <KPI label="Actifs" value={activeCount} icon={Wifi} color="text-emerald-600" filterKey="active" activeKPI={activeKPI} onClick={handleKPIClick} />
+          <KPI label="Hors ligne" value={offlineCount} icon={WifiOff} color={offlineCount > 0 ? 'text-red-500' : 'text-gray-400'} filterKey="offline" activeKPI={activeKPI} onClick={handleKPIClick} />
+          <KPI label="Sous-utilises" value={underUsed} icon={XCircle} color={underUsed > 0 ? 'text-amber-600' : 'text-gray-400'} subtitle="< 10 km sur la periode" filterKey="underused" activeKPI={activeKPI} onClick={handleKPIClick} />
+          <KPI label="Distance totale" value={totalKm.toFixed(0)} unit="km" icon={MapPin} filterKey="distance" activeKPI={activeKPI} onClick={handleKPIClick} />
+          <KPI label="Heures moteur" value={totalEngineH.toFixed(0)} unit="h" icon={Activity} filterKey="engine" activeKPI={activeKPI} onClick={handleKPIClick} />
+          <KPI label="Cout carburant" value={totalFuelCost.toLocaleString('fr-FR')} unit="CHF" icon={DollarSign} subtitle={`~8.5 L/100 x ${FUEL_PRICE} CHF/L`} filterKey="fuel" activeKPI={activeKPI} onClick={handleKPIClick} />
         </div>
+
+        {/* Active KPI filter indicator */}
+        {activeKPI && (
+          <div className="flex items-center gap-2 px-4 py-2.5 bg-[#111] text-white rounded-xl text-xs font-medium" data-testid="kpi-filter-indicator">
+            <Filter size={13} />
+            <span>{kpiFilterLabels[activeKPI]} — {kpiFilteredIds?.length || 0} vehicules</span>
+            <button onClick={() => setActiveKPI(null)} className="ml-auto px-2 py-0.5 bg-white/20 rounded-lg hover:bg-white/30 text-[10px]">
+              Retirer le filtre
+            </button>
+          </div>
+        )}
 
         {/* Top/Worst + Consumption chart */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

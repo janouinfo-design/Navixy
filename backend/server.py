@@ -15,20 +15,37 @@ import json
 import io
 import csv
 import re
+import asyncio
+import time
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection - flexible for Railway/local
+# MongoDB connection
 mongo_url = os.environ.get('MONGO_URL', os.environ.get('MONGODB_URL', 'mongodb://localhost:27017'))
 db_name = os.environ.get('DB_NAME', 'navixy_dashboard')
 client = AsyncIOMotorClient(mongo_url)
 db = client[db_name]
 
-# Navixy configuration - Default hash (fallback)
+# Navixy configuration
 DEFAULT_NAVIXY_HASH = os.environ.get('NAVIXY_HASH', '')
 NAVIXY_API_URL = os.environ.get('NAVIXY_API_URL', 'https://api.navixy.com/v2')
 BASE_DOMAIN = os.environ.get('BASE_DOMAIN', 'logitrak.ch')
+
+# ============ CACHE ============
+_cache = {}
+CACHE_TTL = 300  # 5 minutes
+
+def cache_get(key):
+    if key in _cache:
+        data, ts = _cache[key]
+        if time.time() - ts < CACHE_TTL:
+            return data
+        del _cache[key]
+    return None
+
+def cache_set(key, data):
+    _cache[key] = (data, time.time())
 
 # Create the main app
 app = FastAPI(title="Navixy Fleet Dashboard - Multi-Client")
@@ -362,6 +379,12 @@ async def get_fleet_stats(
     """Get fleet efficiency statistics"""
     navixy_hash = await get_navixy_hash_from_request(request)
     
+    # Check cache
+    cache_key = f"fleet_stats:{navixy_hash}:{from_date}:{to_date}:{tracker_ids}"
+    cached = cache_get(cache_key)
+    if cached:
+        return cached
+    
     # Get list of trackers
     trackers_data = await navixy_request("tracker/list", navixy_hash=navixy_hash)
     if not trackers_data.get('success'):
@@ -369,51 +392,60 @@ async def get_fleet_stats(
     
     all_trackers = trackers_data.get('list', [])
     
-    # Filter by tracker_ids if provided
     if tracker_ids:
         ids = [int(x) for x in tracker_ids.split(',')]
         all_trackers = [t for t in all_trackers if t['id'] in ids]
     
-    # Batch fetch mileage for the period using stats/mileage API (returns km per day)
     tracker_id_list = [t['id'] for t in all_trackers]
     
-    period_mileage = {}  # tracker_id -> total km in period
+    if not tracker_id_list:
+        return {"success": True, "period": {"from": from_date, "to": to_date}, "vehicles": [], "summary": {"total_vehicles": 0, "total_mileage": 0, "total_engine_hours": 0, "average_efficiency": 0}}
     
-    if tracker_id_list:
-        mileage_data = await navixy_request("tracker/stats/mileage/read", {
+    # Batch get all states - parallel individual calls (15 at a time)
+    states_map = {}
+    async def get_single_state(tid):
+        return tid, await navixy_request("tracker/get_state", {"tracker_id": tid}, navixy_hash=navixy_hash)
+    
+    batch_size = 15
+    for i in range(0, len(tracker_id_list), batch_size):
+        batch = tracker_id_list[i:i+batch_size]
+        results = await asyncio.gather(*[get_single_state(tid) for tid in batch])
+        for tid, result in results:
+            if result.get('success'):
+                states_map[tid] = result.get('state', {})
+    
+    # Fetch mileage, odometer, engine hours in PARALLEL
+    mileage_data, odo_data, eh_data = await asyncio.gather(
+        navixy_request("tracker/stats/mileage/read", {
             "trackers": tracker_id_list,
             "from": f"{from_date} 00:00:00",
             "to": f"{to_date} 23:59:59"
-        }, navixy_hash=navixy_hash)
-        
-        if mileage_data.get('success'):
-            result = mileage_data.get('result', {})
-            for tid_str, days_data in result.items():
-                total_km = sum(
-                    (day.get('mileage', 0) if isinstance(day, dict) else 0)
-                    for day in days_data.values()
-                    if day is not None
-                )
-                period_mileage[tid_str] = round(total_km, 1)
-    
-    # Batch fetch total odometer and engine hours
-    odometer_values = {}
-    engine_hours_values = {}
-    
-    if tracker_id_list:
-        odo_data = await navixy_request("tracker/counter/value/list", {
+        }, navixy_hash=navixy_hash),
+        navixy_request("tracker/counter/value/list", {
             "trackers": tracker_id_list,
             "type": "odometer"
-        }, navixy_hash=navixy_hash)
-        if odo_data.get('success'):
-            odometer_values = odo_data.get('value', {})
-        
-        eh_data = await navixy_request("tracker/counter/value/list", {
+        }, navixy_hash=navixy_hash),
+        navixy_request("tracker/counter/value/list", {
             "trackers": tracker_id_list,
             "type": "engine_hours"
         }, navixy_hash=navixy_hash)
-        if eh_data.get('success'):
-            engine_hours_values = eh_data.get('value', {})
+    )
+    
+    # Parse mileage
+    period_mileage = {}
+    if mileage_data.get('success'):
+        result = mileage_data.get('result', {})
+        for tid_str, days_data in result.items():
+            total_km = sum(
+                (day.get('mileage', 0) if isinstance(day, dict) else 0)
+                for day in days_data.values()
+                if day is not None
+            )
+            period_mileage[tid_str] = round(total_km, 1)
+    
+    # Parse odometer and engine hours
+    odometer_values = odo_data.get('value', {}) if odo_data.get('success') else {}
+    engine_hours_values = eh_data.get('value', {}) if eh_data.get('success') else {}
     
     stats = []
     total_mileage = 0
@@ -423,20 +455,14 @@ async def get_fleet_stats(
         tracker_id = tracker['id']
         tid_str = str(tracker_id)
         
-        # Get state for GPS, speed, connection info
-        state_data = await navixy_request("tracker/get_state", {
-            "tracker_id": tracker_id
-        }, navixy_hash=navixy_hash)
+        # Get state from batch results
+        state = states_map.get(tracker_id, {})
+        gps_state = state.get('gps', {})
+        connection_status = state.get('connection_status', 'unknown')
         
-        # Period mileage in km (from stats/mileage API)
         mileage_km = period_mileage.get(tid_str, 0)
-        # Total odometer in km
         total_odometer_km = odometer_values.get(tid_str, 0) or 0
-        # Engine hours
         engine_hours = engine_hours_values.get(tid_str, 0) or 0
-        
-        gps_state = state_data.get('state', {}).get('gps', {}) if state_data.get('success') else {}
-        connection_status = state_data.get('state', {}).get('connection_status', 'unknown') if state_data.get('success') else 'unknown'
         
         # Calculate efficiency based on mileage in period
         efficiency = min(100, round((mileage_km / 100) * 10, 1)) if mileage_km > 0 else (100 if connection_status == 'active' else 0)
@@ -465,7 +491,7 @@ async def get_fleet_stats(
     num_trackers = len(stats) or 1
     avg_efficiency = sum(s['efficiency'] for s in stats) / num_trackers
     
-    return {
+    result = {
         "success": True,
         "period": {"from": from_date, "to": to_date},
         "summary": {
@@ -476,6 +502,8 @@ async def get_fleet_stats(
         },
         "vehicles": stats
     }
+    cache_set(cache_key, result)
+    return result
 
 @api_router.get("/fleet/efficiency")
 async def get_fleet_efficiency(
@@ -485,36 +513,52 @@ async def get_fleet_efficiency(
 ):
     """Get fleet efficiency report similar to Navixy UI"""
     navixy_hash = await get_navixy_hash_from_request(request)
-    # Get all trackers
+    
+    cache_key = f"fleet_eff:{navixy_hash}:{date}:{period}"
+    cached = cache_get(cache_key)
+    if cached:
+        return cached
+    
     trackers_data = await navixy_request("tracker/list", navixy_hash=navixy_hash)
     if not trackers_data.get('success'):
         raise HTTPException(status_code=400, detail="Failed to fetch trackers")
+    
+    tracker_list = trackers_data.get('list', [])
+    tracker_id_list = [t['id'] for t in tracker_list]
+    
+    # Batch get states in parallel
+    states_map = {}
+    async def get_single_state(tid):
+        return tid, await navixy_request("tracker/get_state", {"tracker_id": tid}, navixy_hash=navixy_hash)
+    
+    batch_size = 15
+    for i in range(0, len(tracker_id_list), batch_size):
+        batch = tracker_id_list[i:i+batch_size]
+        results = await asyncio.gather(*[get_single_state(tid) for tid in batch])
+        for tid, result in results:
+            if result.get('success'):
+                states_map[tid] = result.get('state', {})
     
     vehicles = []
     total_driving_time = 0
     total_idle_time = 0
     total_stopped_time = 0
     
-    for tracker in trackers_data.get('list', []):
+    for tracker in tracker_list:
         tracker_id = tracker['id']
-        
-        # Get state
-        state_data = await navixy_request("tracker/get_state", {"tracker_id": tracker_id}, navixy_hash=navixy_hash)
-        
-        state = state_data.get('state', {}) if state_data.get('success') else {}
+        state = states_map.get(tracker_id, {})
         gps = state.get('gps', {})
         movement_status = state.get('movement_status', 'unknown')
         
-        # Simulate time calculations (in real scenario, this would come from reports)
         driving_time = 0
         idle_time = 0
-        stopped_time = 86400  # 24 hours in seconds
+        stopped_time = 86400
         
         if movement_status == 'moving':
-            driving_time = 3600  # 1 hour example
+            driving_time = 3600
             stopped_time -= driving_time
         elif movement_status == 'idle':
-            idle_time = 1800  # 30 min example
+            idle_time = 1800
             stopped_time -= idle_time
         
         efficiency = round((driving_time / 86400) * 100, 1) if driving_time > 0 else 0
@@ -532,13 +576,13 @@ async def get_fleet_efficiency(
             "stopped_time": stopped_time,
             "movement_status": movement_status,
             "speed": gps.get('speed', 0),
-            "timeline": []  # Would be filled with hourly data
+            "timeline": []
         })
     
     num_vehicles = len(vehicles) or 1
     avg_efficiency = round((total_driving_time / (num_vehicles * 86400)) * 100, 1)
     
-    return {
+    result = {
         "success": True,
         "date": date,
         "period": period,
@@ -550,6 +594,8 @@ async def get_fleet_efficiency(
         },
         "vehicles": vehicles
     }
+    cache_set(cache_key, result)
+    return result
 
 # ============ DRIVER REPORT (INVERTED) ============
 
@@ -982,22 +1028,39 @@ async def get_fleet_trends(
 async def get_vehicle_comparison(request: Request):
     """Compare efficiency across all vehicles"""
     navixy_hash = await get_navixy_hash_from_request(request)
+    
+    cache_key = f"vehicle_comp:{navixy_hash}"
+    cached = cache_get(cache_key)
+    if cached:
+        return cached
+    
     trackers_data = await navixy_request("tracker/list", navixy_hash=navixy_hash)
     if not trackers_data.get('success'):
         raise HTTPException(status_code=400, detail="Failed to fetch trackers")
     
     import random
     
+    tracker_list = trackers_data.get('list', [])
+    tracker_id_list = [t['id'] for t in tracker_list]
+    
+    # Batch get states in parallel
+    states_map = {}
+    async def get_single_state(tid):
+        return tid, await navixy_request("tracker/get_state", {"tracker_id": tid}, navixy_hash=navixy_hash)
+    
+    batch_size = 15
+    for i in range(0, len(tracker_id_list), batch_size):
+        batch = tracker_id_list[i:i+batch_size]
+        results = await asyncio.gather(*[get_single_state(tid) for tid in batch])
+        for tid, result in results:
+            if result.get('success'):
+                states_map[tid] = result.get('state', {})
+    
     comparison = []
-    for tracker in trackers_data.get('list', []):
-        # Get current state
-        state_data = await navixy_request("tracker/get_state", {"tracker_id": tracker['id']}, navixy_hash=navixy_hash)
+    for tracker in tracker_list:
+        state = states_map.get(tracker['id'], {})
+        is_active = state.get('connection_status') == 'active'
         
-        is_active = False
-        if state_data.get('success'):
-            is_active = state_data.get('state', {}).get('connection_status') == 'active'
-        
-        # Simulate comparison metrics
         comparison.append({
             "tracker_id": tracker['id'],
             "label": tracker['label'],
@@ -1011,15 +1074,16 @@ async def get_vehicle_comparison(request: Request):
             "violations_count": random.randint(0, 5)
         })
     
-    # Sort by efficiency score
     comparison.sort(key=lambda x: x["efficiency_score"], reverse=True)
     
-    return {
+    result = {
         "success": True,
         "vehicles": comparison,
         "top_performer": comparison[0] if comparison else None,
         "needs_attention": [v for v in comparison if v["efficiency_score"] < 50]
     }
+    cache_set(cache_key, result)
+    return result
 
 # Include the router in the main app
 app.include_router(api_router)

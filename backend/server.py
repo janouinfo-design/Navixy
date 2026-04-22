@@ -505,6 +505,131 @@ async def get_fleet_stats(
     cache_set(cache_key, result)
     return result
 
+
+# ============ IDLE BY GROUP (Engins de chantier) ============
+ENGIN_GROUPS = {"CHARGEUSE": None, "Dumpers": None, "Pelles": None}
+
+@api_router.get("/fleet/idle-by-group")
+async def get_idle_by_group(request: Request):
+    """Get idle time breakdown for equipment groups (Chargeuse, Dumpers, Pelles)"""
+    navixy_hash = await get_navixy_hash_from_request(request)
+    
+    cache_key = f"idle_group:{navixy_hash}"
+    cached = cache_get(cache_key)
+    if cached:
+        return cached
+    
+    # Get groups
+    groups_data = await navixy_request("tracker/group/list", navixy_hash=navixy_hash)
+    if not groups_data.get('success'):
+        return {"success": True, "groups": [], "message": "No groups found"}
+    
+    # Find engin group IDs
+    engin_group_map = {}
+    for g in groups_data.get('list', []):
+        name_upper = g['title'].upper()
+        if 'CHARGEUSE' in name_upper:
+            engin_group_map[g['id']] = 'CHARGEUSE'
+        elif 'DUMPER' in name_upper:
+            engin_group_map[g['id']] = 'Dumpers'
+        elif 'PELLE' in name_upper:
+            engin_group_map[g['id']] = 'Pelles'
+    
+    if not engin_group_map:
+        return {"success": True, "groups": [], "message": "No equipment groups found"}
+    
+    # Get all trackers
+    trackers_data = await navixy_request("tracker/list", navixy_hash=navixy_hash)
+    if not trackers_data.get('success'):
+        return {"success": True, "groups": [], "message": "Failed to fetch trackers"}
+    
+    # Group trackers by engin type
+    grouped_trackers = {}
+    for tracker in trackers_data.get('list', []):
+        gid = tracker.get('group_id')
+        if gid in engin_group_map:
+            group_name = engin_group_map[gid]
+            if group_name not in grouped_trackers:
+                grouped_trackers[group_name] = []
+            grouped_trackers[group_name].append(tracker)
+    
+    # Get states for all engin trackers in parallel
+    all_engin_ids = []
+    for trackers in grouped_trackers.values():
+        all_engin_ids.extend([t['id'] for t in trackers])
+    
+    states_map = {}
+    async def get_single_state(tid):
+        return tid, await navixy_request("tracker/get_state", {"tracker_id": tid}, navixy_hash=navixy_hash)
+    
+    batch_size = 15
+    for i in range(0, len(all_engin_ids), batch_size):
+        batch = all_engin_ids[i:i+batch_size]
+        results = await asyncio.gather(*[get_single_state(tid) for tid in batch])
+        for tid, result in results:
+            if result.get('success'):
+                states_map[tid] = result.get('state', {})
+    
+    # Calculate idle stats per group
+    group_results = []
+    total_idle_engins = 0
+    total_engins = 0
+    
+    for group_name, trackers in grouped_trackers.items():
+        idle_count = 0
+        active_count = 0
+        total_in_group = len(trackers)
+        vehicles_detail = []
+        
+        for tracker in trackers:
+            state = states_map.get(tracker['id'], {})
+            movement = state.get('movement_status', 'unknown')
+            conn = state.get('connection_status', 'unknown')
+            speed = state.get('gps', {}).get('speed', 0)
+            
+            is_idle = (conn == 'active' and (movement == 'idle' or speed < 5))
+            is_active = (conn == 'active' and movement == 'moving' and speed >= 5)
+            
+            if is_idle:
+                idle_count += 1
+            if is_active:
+                active_count += 1
+            
+            vehicles_detail.append({
+                "tracker_id": tracker['id'],
+                "label": tracker['label'],
+                "status": "idle" if is_idle else "active" if is_active else "offline",
+                "speed": speed,
+                "movement": movement,
+                "connection": conn
+            })
+        
+        idle_pct = round((idle_count / total_in_group) * 100) if total_in_group > 0 else 0
+        total_idle_engins += idle_count
+        total_engins += total_in_group
+        
+        group_results.append({
+            "name": group_name,
+            "total": total_in_group,
+            "active": active_count,
+            "idle": idle_count,
+            "offline": total_in_group - active_count - idle_count,
+            "idle_percentage": idle_pct,
+            "vehicles": vehicles_detail
+        })
+    
+    total_idle_pct = round((total_idle_engins / total_engins) * 100) if total_engins > 0 else 0
+    
+    result = {
+        "success": True,
+        "total_engins": total_engins,
+        "total_idle": total_idle_engins,
+        "total_idle_percentage": total_idle_pct,
+        "groups": group_results
+    }
+    cache_set(cache_key, result)
+    return result
+
 @api_router.get("/fleet/efficiency")
 async def get_fleet_efficiency(
     request: Request,

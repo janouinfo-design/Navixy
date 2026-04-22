@@ -155,6 +155,7 @@ export const DashboardView = ({ onMenuClick }) => {
   const [stats, setStats] = useState(null);
   const [trends, setTrends] = useState(null);
   const [comparison, setComparison] = useState(null);
+  const [idleGroups, setIdleGroups] = useState(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [period, setPeriod] = useState('week');
@@ -164,14 +165,16 @@ export const DashboardView = ({ onMenuClick }) => {
   const fetchAll = useCallback(async (from, to) => {
     setLoading(true);
     try {
-      const [statsRes, trendsRes, compRes] = await Promise.all([
+      const [statsRes, trendsRes, compRes, idleRes] = await Promise.all([
         api.get(`${API}/fleet/stats`, { params: { from_date: from || fromDate, to_date: to || toDate } }),
         api.get(`${API}/analytics/trends`, { params: { period: 'week' } }),
-        api.get(`${API}/analytics/vehicle-comparison`)
+        api.get(`${API}/analytics/vehicle-comparison`),
+        api.get(`${API}/fleet/idle-by-group`).catch(() => ({ data: { success: false } }))
       ]);
       if (statsRes.data.success) setStats(statsRes.data);
       if (trendsRes.data.success) setTrends(trendsRes.data);
       if (compRes.data.success) setComparison(compRes.data);
+      if (idleRes.data.success && idleRes.data.groups?.length > 0) setIdleGroups(idleRes.data);
       setLastUpdate(new Date().toISOString());
     } catch (error) { console.error("Dashboard fetch error:", error); }
     setLoading(false);
@@ -267,8 +270,13 @@ export const DashboardView = ({ onMenuClick }) => {
               breakdown: [
                 { label: 'Heures ralenti total', value: `${summary.totalIdleH}h`, color: 'bg-amber-500' },
                 { label: 'Perte estimee', value: `${summary.idleCostEstimate} CHF`, color: 'bg-red-500' },
+                ...(idleGroups ? [
+                  { label: `Chargeuses au ralenti`, value: `${idleGroups.groups.find(g => g.name === 'CHARGEUSE')?.idle || 0}`, color: 'bg-blue-500' },
+                  { label: `Dumpers au ralenti`, value: `${idleGroups.groups.find(g => g.name === 'Dumpers')?.idle || 0}`, color: 'bg-green-500' },
+                  { label: `Pelles au ralenti`, value: `${idleGroups.groups.find(g => g.name === 'Pelles')?.idle || 0}`, color: 'bg-purple-500' },
+                ] : []),
               ],
-              tip: 'Le ralenti represente souvent 10-30% de la consommation totale. Sensibilisez les conducteurs a couper le moteur lors des arrets prolonges.'
+              tip: 'Le ralenti represente souvent 10-30% de la consommation totale. Pour les engins de chantier (Chargeuses, Dumpers, Pelles), le bloc detaille est affiche plus bas.'
             }} />
           <KPICard label="Alertes" value={summary.alertCount} icon={AlertTriangle}
             status={summary.alertCount === 0 ? 'good' : summary.alertCount <= 5 ? 'warning' : 'danger'} subtitle={`${summary.violations} exces vitesse`}
@@ -290,6 +298,92 @@ export const DashboardView = ({ onMenuClick }) => {
               tip: 'Comparez les heures moteur avec la distance parcourue. Un ratio eleve (beaucoup d\'heures, peu de km) indique un ralenti excessif.'
             }} />
         </div>
+
+        {/* Idle by Equipment Group (Engins de chantier) */}
+        {idleGroups && idleGroups.groups.length > 0 && (
+          <div className="bg-white rounded-xl border border-gray-200 p-6" data-testid="idle-by-group">
+            <SectionHeader icon={Clock} title="Ralenti Engins de Chantier" iconBg="bg-amber-100" iconColor="text-amber-600" count={`${idleGroups.total_engins} engins`} />
+            <p className="text-xs text-gray-500 -mt-2 mb-4">
+              Suivi en temps reel du ralenti des groupes Chargeuses, Dumpers et Pelles. Un engin au ralenti = moteur allume, vitesse &lt; 5 km/h.
+            </p>
+
+            {/* Global summary */}
+            <div className="flex items-center gap-3 mb-5 p-3 rounded-xl bg-gray-50 border border-gray-200">
+              <div className={`w-14 h-14 rounded-xl flex items-center justify-center text-white font-bold text-lg ${
+                idleGroups.total_idle_percentage > 30 ? 'bg-red-500' : idleGroups.total_idle_percentage > 15 ? 'bg-amber-500' : 'bg-emerald-500'
+              }`} style={{ fontFamily: 'Outfit, sans-serif' }}>
+                {idleGroups.total_idle_percentage}%
+              </div>
+              <div>
+                <div className="text-sm font-semibold text-gray-800">Taux de ralenti global des engins</div>
+                <div className="text-xs text-gray-500">{idleGroups.total_idle} engins au ralenti sur {idleGroups.total_engins} | Cout estime: ~{Math.round(idleGroups.total_idle * 3)} CHF/h</div>
+              </div>
+            </div>
+
+            {/* Group cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {idleGroups.groups.map(group => {
+                const colors = {
+                  'CHARGEUSE': { bg: 'bg-blue-50', border: 'border-blue-200', icon: 'text-blue-600', bar: 'bg-blue-500' },
+                  'Dumpers': { bg: 'bg-green-50', border: 'border-green-200', icon: 'text-green-600', bar: 'bg-green-500' },
+                  'Pelles': { bg: 'bg-purple-50', border: 'border-purple-200', icon: 'text-purple-600', bar: 'bg-purple-500' }
+                };
+                const c = colors[group.name] || { bg: 'bg-gray-50', border: 'border-gray-200', icon: 'text-gray-600', bar: 'bg-gray-500' };
+
+                return (
+                  <div key={group.name} className={`rounded-xl p-4 border ${c.bg} ${c.border}`}>
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className={`text-sm font-semibold ${c.icon}`} style={{ fontFamily: 'Outfit, sans-serif' }}>{group.name}</h4>
+                      <span className="text-[10px] text-gray-500">{group.total} engins</span>
+                    </div>
+
+                    {/* Stats */}
+                    <div className="grid grid-cols-3 gap-2 mb-3">
+                      <div className="text-center">
+                        <div className="text-lg font-bold text-emerald-600" style={{ fontFamily: 'Outfit, sans-serif' }}>{group.active}</div>
+                        <div className="text-[9px] text-gray-500 uppercase">Actifs</div>
+                      </div>
+                      <div className="text-center">
+                        <div className={`text-lg font-bold ${group.idle > 0 ? 'text-amber-600' : 'text-gray-400'}`} style={{ fontFamily: 'Outfit, sans-serif' }}>{group.idle}</div>
+                        <div className="text-[9px] text-gray-500 uppercase">Ralenti</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-lg font-bold text-gray-400" style={{ fontFamily: 'Outfit, sans-serif' }}>{group.offline}</div>
+                        <div className="text-[9px] text-gray-500 uppercase">Offline</div>
+                      </div>
+                    </div>
+
+                    {/* Idle bar */}
+                    <div className="w-full h-2.5 bg-white rounded-full overflow-hidden border border-gray-200">
+                      <div className="h-full flex">
+                        <div className="h-full bg-emerald-400" style={{ width: `${(group.active / Math.max(1, group.total)) * 100}%` }} />
+                        <div className="h-full bg-amber-400" style={{ width: `${(group.idle / Math.max(1, group.total)) * 100}%` }} />
+                        <div className="h-full bg-gray-300 flex-1" />
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between mt-1.5 text-[9px] text-gray-400">
+                      <span>Ralenti: {group.idle_percentage}%</span>
+                      <span>~{Math.round(group.idle * 3)} CHF/h perdu</span>
+                    </div>
+
+                    {/* Vehicle list */}
+                    {group.idle > 0 && (
+                      <div className="mt-3 space-y-1">
+                        <div className="text-[9px] text-gray-400 uppercase tracking-wider">Engins au ralenti</div>
+                        {group.vehicles.filter(v => v.status === 'idle').map(v => (
+                          <div key={v.tracker_id} className="flex items-center justify-between py-1 px-2 bg-white/70 rounded-lg text-[10px]">
+                            <span className="font-medium text-gray-700">{v.label}</span>
+                            <span className="text-amber-600">{v.speed} km/h</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Insights + Risk */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

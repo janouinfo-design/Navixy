@@ -163,7 +163,7 @@ class AnalyticsEngine:
 
         # Fuel config + motorisation garage (un EV ne reçoit jamais de litres estimés)
         fuel_cfg = await self.get_fuel_config(tenant)
-        rate = fuel_cfg.get('default_consumption_rate')
+        rate = fuel_cfg.get('default_consumption_rate') or (7.5 if navixy_hash == "SIMULATION" else None)
         price = fuel_cfg.get('default_fuel_price') or 2.0
 
         fuel_type_by_tid = {}
@@ -467,7 +467,7 @@ class AnalyticsEngine:
 
         # Fuel config
         fuel_cfg = await self.get_fuel_config(tenant)
-        rate = fuel_cfg.get('default_consumption_rate')
+        rate = fuel_cfg.get('default_consumption_rate') or (7.5 if navixy_hash == "SIMULATION" else None)
         price = fuel_cfg.get('default_fuel_price') or 2.0
         if rate:
             audit.computed("fuel_consumption", "(distance/100) × rate", {"rate": rate})

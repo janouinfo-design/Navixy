@@ -1,0 +1,26 @@
+{
+  "summary": "Frontend-only E2E testing of DOCUMENTS V2 GÉNÉRIQUE (9 scenarios) on tenant demo-ev + read-only check on flex via impersonation. All 9 scenarios PASS. Key scenario validated end-to-end: uploading an 'Assurance RC' document (expiry 2027-03-31) on the Renault Zoe (tracker 900002) produced a green engine badge 'Valide (216 j)' on the document, and propagated as THE assurance source — assurance-badge in the sheet switched from 'Échu depuis 19 j' (red) to 'Dans 216 j' (green, emerald classes) and badge-assurance-900002 in the vehicle list showed 'Dans 216 j'; after deleting the document both badges reverted to 'Échu depuis 19 j' (internal 2026-08-08 fallback) — single-engine coherence confirmed. Generic 'Autre' document with expiry J+10 raised the Overview 'Échéances < 30 jours' tile from 2 → 3 with drawer label 'Document : Divers E2E TEST · 2026-09-06 (J-10)', and back to 2 after deletion. Both temporary test documents were DELETED (Zoe back to its 2 migrated documents). No data created/modified on flex or default (read-only).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Fiche véhicule > onglet Documents (formulaire d'ajout)", "issues": ["Les 3 champs date utilisent le picker natif du navigateur affiché en format US mm/dd/yyyy alors que l'app affiche les dates en dd.mm.yyyy (incohérence de locale, pas de composant calendrier shadcn)", "Le champ 'Expire le' passe seul sur la 2e ligne en largeur 1920 (flex-wrap) — alignement légèrement déséquilibré, mineur"]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "DocumentsV2Tab.upload/saveEdit/del ne rafraîchissent que la liste locale + onDeadlinesChanged ; l'appel fetchDocs n'est pas awaité (fire & forget) — fonctionnel mais un await éviterait tout état transitoire.",
+    "DocumentsV2Tab.download() n'a aucun try/catch : un échec réseau sur le téléchargement produit une promesse rejetée non gérée (aucun toast utilisateur). Bas risque, à durcir.",
+    "Aucune validation frontend de cohérence des dates (valid_from > expiry_date accepté côté formulaire) — dépend entièrement du backend."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (per request)", "frontend": "100% (9/9 scenarios)"},
+  "seed_data_creation": "2 documents temporaires créés sur demo-ev/Zoe (900002) : 'Police RC E2E' (Assurance RC, exp. 2027-03-31) et 'Divers E2E TEST' (Autre, exp. J+10) — LES DEUX SUPPRIMÉS en fin de test. Titre du document migré carte_grise_DEMO_zoe.png modifié en 'Carte grise Zoe' puis REMIS à sa valeur d'origine. Aucune écriture chez flex/default.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": false,
+  "test_credentials": "demo@logitrak.ch / DemoEV2026! ; admin@logitrak.ch / LT!u4qv8ibtN21iOHDz (fichier /app/memory/test_credentials.md à jour)",
+  "context_for_next_testing_agent": "Détails vérifiés : (1) Zoe Documents affiche les 2 documents migrés avec mention 'importé', miniature image rendue via AuthedFile (blob) et icône PDF rouge ; modal d'aperçu (doc-preview-*, doc-preview-close) s'ouvre/ferme correctement — l'iframe PDF apparaît vide en Chromium headless (pas de plugin PDF), un texte de repli est affiché : NON bloquant. (2) doc-category-select contient exactement les 6 catégories système. (3) doc-upload-btn désactivé sans fichier (aucun appel réseau) et actif après sélection. (4) Édition inline (doc-edit-{id} → doc-edit-form-{id} → doc-edit-save) fonctionne et persiste. (5) Onglet Contrôles : seul le Tesla 900001 a un contrôle ; badge 'Échu depuis 2 j' affiché (bug '—' corrigé) ; les 4 autres véhicules demo-ev n'ont aucun contrôle. (6) Non-régression : Vue générale (KPI, panel maintenance, drawer kpi-drawer, priorités), liste véhicules avec badges, et les 7 onglets de fiche rendent sans erreur ; 0 élément d'erreur DOM. (7) Isolation flex (lecture seule, 52 véhicules parcourus) : un seul document (Carte_grise.jpeg, source importé) présent sur le tracker 3511432 — libellé réel '43-Traceur' (et non 'Mumbai' comme indiqué dans la demande ; Mumbai = 3467688, 0 document) ; aucune fuite de documents demo-ev. Seules erreurs console : 401 sur /api/auth/me avant login (attendu).",
+  "rca_of_the_issue": "Aucun défaut trouvé — la priorité DOCUMENT_V2 > VEHICLE_LEGACY est correctement reflétée dans les 3 emplacements d'affichage (badge document, badge onglet Assurance, badge liste) grâce au rafraîchissement onDeadlinesChanged=fetchDeadlines."
+}

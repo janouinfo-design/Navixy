@@ -26,6 +26,7 @@ from cache_manager import TenantCacheManager
 from analytics_engine import AnalyticsEngine
 from ecodriving import compute_driver_ecodriving
 from vehicle_admin import create_vehicle_admin_router
+from documents_v2 import create_documents_router, migrate_legacy_documents, load_documents_for_engine
 from deadline_engine import (compute_vehicle_deadlines, compute_fleet_deadlines,
                              ENGINE_VERSION as DEADLINE_ENGINE_VERSION, DUE_SOON_DAYS)
 from capabilities import create_capabilities_router
@@ -783,12 +784,13 @@ async def get_vehicles_deadlines(request: Request):
     vg = await navixy.get_vehicles(h)
     garage_ok = bool(vg.get("success"))
     garage_by_tid = {v["tracker_id"]: v for v in vg.get("list", []) if v.get("tracker_id")} if garage_ok else {}
+    docs_by_tid = await load_documents_for_engine(db, tenant)
     return {"success": True,
             "engine_version": DEADLINE_ENGINE_VERSION,
             "thresholds": {"due_soon_days": DUE_SOON_DAYS},
             "garage_available": garage_ok,
             "computed_at": datetime.now(timezone.utc).isoformat(),
-            "deadlines": compute_fleet_deadlines(admin_map, garage_by_tid)}
+            "deadlines": compute_fleet_deadlines(admin_map, garage_by_tid, docs_by_tid)}
 
 # ============ CONTRÔLE D'INTÉGRITÉ IDENTITÉ VÉHICULE (lecture seule, aucune fusion auto) ============
 
@@ -830,6 +832,10 @@ async def get_vehicles_integrity(request: Request):
         if vin and vin.get("conflict"):
             vin_conflicts.append({"tracker_id": int(tid_s), "garage": vin.get("garage"), "obd": vin.get("obd")})
 
+    docs_to_reconcile = await db.documents.find(
+        {"tenant": tenant, "reconcile_status": "to_reconcile"},
+        {"_id": 0, "id": 1, "title": 1, "category_id": 1, "navixy_vehicle_id": 1, "created_at": 1}).to_list(500)
+
     return {"success": True, "tenant": tenant, "no_auto_merge": True,
             "navixy_available": bool(tk.get("success")) and bool(vg.get("success")),
             "identity_strategy": {
@@ -851,7 +857,8 @@ async def get_vehicles_integrity(request: Request):
                                      if d["tracker_id"] not in tracker_ids],
             "ambiguous_tracker_links": ambiguous,
             "duplicate_plates": duplicate_plates,
-            "vin_conflicts": vin_conflicts}
+            "vin_conflicts": vin_conflicts,
+            "documents_to_reconcile": docs_to_reconcile}
 
 # ============ PDF EXPORT ============
 
@@ -870,6 +877,7 @@ async def export_pdf(
     admin_docs = await db.vehicle_admin.find({"tenant": tenant}, {"_id": 0}).to_list(1000)
     admin_map = {d["tracker_id"]: d for d in admin_docs}
     garage_map = {v["tracker_id"]: v for v in garage_data.get("list", []) if v.get("tracker_id")}
+    pdf_docs_by_tid = await load_documents_for_engine(db, tenant)
 
     # Photos garage (avatars) — telechargees en parallele, echecs ignores
     import httpx as _httpx
@@ -1002,7 +1010,8 @@ async def export_pdf(
                  "green": rl_colors.Color(0.0, 0.55, 0.3)}
     for ridx, v in enumerate(stats.get('vehicles', []), start=1):
         tid = v['tracker_id']
-        dl_items = compute_vehicle_deadlines(tid, admin_map.get(tid, {}), garage_map.get(tid))
+        dl_items = compute_vehicle_deadlines(tid, admin_map.get(tid, {}), garage_map.get(tid),
+                                             documents_v2=pdf_docs_by_tid.get(str(tid)))
         by_type = {}
         for it in dl_items:
             cur = by_type.get(it["deadline_type"])
@@ -1092,6 +1101,7 @@ async def export_pdf(
 # ============ MOUNT ============
 
 api_router.include_router(create_vehicle_admin_router(db, navixy, get_tenant_context, NAVIXY_API_URL))
+api_router.include_router(create_documents_router(db, get_tenant_context))
 api_router.include_router(create_capabilities_router(db, navixy, cache, get_tenant_context))
 api_router.include_router(create_super_admin_router(db, navixy, cache))
 app.include_router(auth_router)
@@ -1101,6 +1111,9 @@ app.include_router(api_router)
 @app.on_event("startup")
 async def startup_seed():
     await seed_and_migrate(db)
+    migrated = await migrate_legacy_documents(db)
+    if migrated:
+        logger.info(f"Documents V2 : {migrated} document(s) legacy migré(s)")
     logger.info("Auth seed + migration multi-tenant OK")
 
 app.add_middleware(

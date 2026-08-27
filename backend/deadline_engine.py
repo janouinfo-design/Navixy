@@ -19,13 +19,14 @@ Règles de statut (héritées de l'existant, inchangées) :
   0 ≤ days < 30       → DUE_SOON (warning)
   days ≥ 30           → VALID    (info)
 
-Hook Documents V2 : documents_v2 = liste de {document_id, deadline_type, expiry_date}.
-Quand Documents V2 existera, il suffira de passer ses documents ici — aucun consommateur
-ne devra changer.
+Hook Documents V2 : documents_v2 = liste de {document_id, deadline_type, expiry_date,
+label?, critical?}. Pour assurance/leasing, le document en vigueur = expiry la plus
+lointaine (renouvellement). Le type générique "document" émet chaque document
+individuellement, criticité portée par le flag de sa catégorie.
 """
 from datetime import datetime, timezone
 
-ENGINE_VERSION = "1.0.0"
+ENGINE_VERSION = "1.1.0"
 DUE_SOON_DAYS = 30
 
 SOURCE_DOCUMENT_V2 = "DOCUMENT_V2"
@@ -64,9 +65,9 @@ def _status(days: int) -> str:
     return STATUS_VALID
 
 
-def _severity(dtype: str, status: str) -> str:
+def _severity(critical: bool, status: str) -> str:
     if status == STATUS_EXPIRED:
-        return "critical" if dtype in CRITICAL_WHEN_OVERDUE else "warning"
+        return "critical" if critical else "warning"
     if status == STATUS_DUE_SOON:
         return "warning"
     return "info"
@@ -81,10 +82,11 @@ def compute_vehicle_deadlines(tracker_id, admin_rec=None, garage_vehicle=None,
     gv = garage_vehicle or {}
     items = []
 
-    def emit(dtype, due_value, source, source_field, source_id=None, label=None):
+    def emit(dtype, due_value, source, source_field, source_id=None, label=None, critical=None):
         d = _parse_date(due_value)
         if d is None:
             return  # null ≠ 0 — aucune échéance fabriquée
+        crit = (dtype in CRITICAL_WHEN_OVERDUE) if critical is None else bool(critical)
         days = (d - today).days
         st = _status(days)
         items.append({
@@ -94,17 +96,25 @@ def compute_vehicle_deadlines(tracker_id, admin_rec=None, garage_vehicle=None,
             "due_date": d.isoformat(),
             "days_remaining": days,
             "status": st,
-            "severity": _severity(dtype, st),
-            "critical_when_overdue": dtype in CRITICAL_WHEN_OVERDUE,
+            "severity": _severity(crit, st),
+            "critical_when_overdue": crit,
             "source": source,
             "source_field": source_field,
             "source_id": source_id,
         })
 
     docs = {}
+    generic_docs = []
     for doc in (documents_v2 or []):
         dtype = doc.get("deadline_type")
-        if dtype and _parse_date(doc.get("expiry_date")) and dtype not in docs:
+        if not dtype or not _parse_date(doc.get("expiry_date")):
+            continue
+        if dtype == "document":
+            generic_docs.append(doc)
+            continue
+        cur = docs.get(dtype)
+        # Renouvellement : le document en vigueur = expiry la plus lointaine
+        if cur is None or _parse_date(doc["expiry_date"]) > _parse_date(cur["expiry_date"]):
             docs[dtype] = doc
 
     # Assurance RC — DOCUMENT_V2 > NAVIXY_GARAGE > VEHICLE_LEGACY (correction bug C1)
@@ -133,6 +143,12 @@ def compute_vehicle_deadlines(tracker_id, admin_rec=None, garage_vehicle=None,
                  "controles.due_date", c.get("id"),
                  label=f"Contrôle : {c.get('label') or 'Contrôle'}")
 
+    # Documents génériques à échéance (chaque document émis individuellement)
+    for doc in generic_docs:
+        emit("document", doc["expiry_date"], SOURCE_DOCUMENT_V2, "expiry_date",
+             doc.get("document_id"), label=doc.get("label") or "Document",
+             critical=doc.get("critical", False))
+
     # Maintenance / expertise
     g = rec.get("general") or {}
     emit("maintenance", g.get("prochaine_maintenance"),
@@ -143,16 +159,19 @@ def compute_vehicle_deadlines(tracker_id, admin_rec=None, garage_vehicle=None,
     return items
 
 
-def compute_fleet_deadlines(admin_records, garage_by_tid, today=None):
+def compute_fleet_deadlines(admin_records, garage_by_tid, documents_by_tid=None, today=None):
     """Échéances de toute la flotte.
-    admin_records : dict {tracker_id str -> fiche vehicle_admin}
-    garage_by_tid : dict {tracker_id int -> véhicule garage Navixy}
+    admin_records    : dict {tracker_id str -> fiche vehicle_admin}
+    garage_by_tid    : dict {tracker_id int -> véhicule garage Navixy}
+    documents_by_tid : dict {tracker_id str -> [items Documents V2]} (optionnel)
     """
+    documents_by_tid = documents_by_tid or {}
     out = []
-    tids = {str(k) for k in admin_records} | {str(k) for k in garage_by_tid}
+    tids = {str(k) for k in admin_records} | {str(k) for k in garage_by_tid} | {str(k) for k in documents_by_tid}
     for tid_s in sorted(tids, key=lambda x: int(x) if x.isdigit() else 0):
         tid = int(tid_s)
         out.extend(compute_vehicle_deadlines(
             tid, admin_records.get(tid_s),
-            garage_by_tid.get(tid) or garage_by_tid.get(tid_s), today=today))
+            garage_by_tid.get(tid) or garage_by_tid.get(tid_s),
+            documents_v2=documents_by_tid.get(tid_s), today=today))
     return out

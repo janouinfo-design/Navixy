@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { API, api } from "@/lib/api";
 import { toast } from "sonner";
+import { DocumentsV2Tab } from "./DocumentsV2Tab";
 import {
   Search, ChevronRight, X, Pencil, Check, Plus, Trash2,
   FileText, Download, Upload, Hash, Gauge, Radio, ShieldCheck,
@@ -230,7 +231,7 @@ const EditableSection = ({ title, subtitle, fields, values, readonlyFields = [],
 };
 
 // ─── Onglet Contrôles ───
-const ControlesTab = ({ tid, record, refresh }) => {
+const ControlesTab = ({ tid, record, refresh, deadlines = {} }) => {
   const [form, setForm] = useState({ label: "", due_date: "", notes: "" });
   const add = async () => {
     if (!form.label || !form.due_date) return;
@@ -268,7 +269,7 @@ const ControlesTab = ({ tid, record, refresh }) => {
             <div className="text-[10px] text-gray-400">Échéance : {fmtDate(c.due_date)}{c.done_date ? ` — effectué le ${fmtDate(c.done_date)}` : ""}{c.notes ? ` · ${c.notes}` : ""}</div>
           </div>
           <div className="flex items-center gap-2">
-            {c.done_date ? <span className="text-[10px] font-medium text-emerald-600 bg-emerald-50 border border-emerald-100 rounded-full px-2 py-1">Effectué</span> : <Badge date={c.due_date} />}
+            {c.done_date ? <span className="text-[10px] font-medium text-emerald-600 bg-emerald-50 border border-emerald-100 rounded-full px-2 py-1">Effectué</span> : <Badge item={deadlines[`${tid}:controle:${c.id}`]} />}
             {!c.done_date && <button onClick={() => markDone(c.id)} className="text-[10px] px-2 py-1 border border-gray-200 rounded-lg hover:bg-gray-50" data-testid={`controle-done-${c.id}`}>Marquer effectué</button>}
             <button onClick={() => del(c.id)} className="p-1.5 text-gray-300 hover:text-red-500" data-testid={`controle-del-${c.id}`}><Trash2 size={13} /></button>
           </div>
@@ -323,138 +324,8 @@ const EtatTab = ({ tid, record, refresh }) => {
   );
 };
 
-// Fichier chargé via l'API authentifiée (les <img>/<a> directs ne portent pas le header d'impersonation)
-const AuthedFile = ({ url, render }) => {
-  const [src, setSrc] = useState(null);
-  useEffect(() => {
-    let obj = null, cancelled = false;
-    api.get(url, { responseType: "blob" })
-      .then(r => { if (!cancelled) { obj = URL.createObjectURL(r.data); setSrc(obj); } })
-      .catch(() => {});
-    return () => { cancelled = true; if (obj) URL.revokeObjectURL(obj); };
-  }, [url]);
-  return render(src);
-};
-
-// ─── Onglet Documents ───
-const DocumentsTab = ({ tid, record, refresh }) => {
-  const [category, setCategory] = useState("Carte grise");
-  const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState(null);
-
-  const upload = async (file) => {
-    if (!file) return;
-    setUploading(true); setError(null);
-    const fd = new FormData();
-    fd.append("file", file);
-    fd.append("category", category);
-    try {
-      await api.post(`${API}/vehicles/admin/${tid}/documents`, fd, { headers: { "Content-Type": "multipart/form-data" }, timeout: 120000 });
-      refresh();
-    } catch (e) {
-      setError(e.response?.status === 413 ? "Fichier trop volumineux (max 25 Mo)" : "Échec de l'envoi du fichier");
-    }
-    setUploading(false);
-  };
-  const del = async (docId) => { await api.delete(`${API}/vehicles/admin/${tid}/documents/${docId}`); refresh(); };
-  const items = [...(record.documents || [])].sort((a, b) => (b.uploaded_at || "").localeCompare(a.uploaded_at || ""));
-  const [preview, setPreview] = useState(null);
-  const fileUrl = (d, inline) => `${API}/vehicles/admin/${tid}/documents/${d.id}${inline ? "?inline=1" : ""}`;
-  const isImage = (d) => (d.content_type || "").startsWith("image/");
-  const isPdf = (d) => (d.content_type || "") === "application/pdf";
-  const download = async (d) => {
-    const r = await api.get(fileUrl(d, false), { responseType: "blob" });
-    const u = URL.createObjectURL(r.data);
-    const a = document.createElement("a");
-    a.href = u; a.download = d.filename; a.click();
-    setTimeout(() => URL.revokeObjectURL(u), 5000);
-  };
-
-  return (
-    <div className="space-y-3" data-testid="tab-content-documents">
-      <div className="bg-white border border-gray-200 rounded-xl p-4">
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-2">Ajouter un document (max 25 Mo)</div>
-        <div className="flex flex-wrap items-center gap-2">
-          <select value={category} onChange={e => setCategory(e.target.value)}
-            className="text-xs border border-gray-200 rounded-lg px-3 py-2 focus:outline-none bg-white" data-testid="doc-category-select">
-            {["Carte grise", "Leasing", "Assurance", "Contrôle", "Facture", "Autre"].map(o => <option key={o}>{o}</option>)}
-          </select>
-          <label className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg cursor-pointer ${uploading ? "bg-gray-100 text-gray-400" : "bg-[#111] text-white hover:bg-black"}`}>
-            {uploading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
-            {uploading ? "Envoi en cours…" : "Choisir un fichier"}
-            <input type="file" className="hidden" disabled={uploading} onChange={e => upload(e.target.files[0])} data-testid="doc-file-input" />
-          </label>
-          {error && <span className="text-[10px] text-red-500" data-testid="doc-error">{error}</span>}
-        </div>
-      </div>
-      {items.length === 0 ? (
-        <div className="text-center text-xs text-gray-400 py-8">Aucun document</div>
-      ) : items.map(d => (
-        <div key={d.id} className="flex items-center justify-between bg-white border border-gray-200 rounded-xl p-3.5" data-testid={`doc-item-${d.id}`}>
-          <div className="flex items-center gap-3 min-w-0">
-            {isImage(d) ? (
-              <button onClick={() => setPreview(d)} className="w-12 h-12 rounded-lg border border-gray-200 overflow-hidden shrink-0 hover:opacity-80 transition-opacity bg-gray-50" title="Aperçu" data-testid={`doc-thumb-${d.id}`}>
-                <AuthedFile url={fileUrl(d, true)} render={(src) => src
-                  ? <img src={src} alt={d.filename} className="w-full h-full object-cover" />
-                  : <FileText size={17} className="text-gray-300 m-auto" />} />
-              </button>
-            ) : (
-              <div className={`w-12 h-12 rounded-lg bg-gray-50 border border-gray-200 flex items-center justify-center shrink-0 ${isPdf(d) ? "cursor-pointer hover:bg-gray-100" : ""}`}
-                onClick={isPdf(d) ? () => setPreview(d) : undefined} title={isPdf(d) ? "Aperçu" : undefined}>
-                <FileText size={17} className={isPdf(d) ? "text-red-400" : "text-gray-400"} />
-              </div>
-            )}
-            <div className="min-w-0">
-              <div className="text-xs font-medium text-gray-900 truncate">{d.filename}</div>
-              <div className="text-[10px] text-gray-400">{d.category} · {fmtSize(d.size)} · {fmtDate(d.uploaded_at)}</div>
-            </div>
-          </div>
-          <div className="flex items-center gap-1 shrink-0">
-            {(isImage(d) || isPdf(d)) && (
-              <button onClick={() => setPreview(d)} className="p-1.5 text-gray-400 hover:text-gray-700" title="Aperçu" data-testid={`doc-preview-${d.id}`}><Eye size={14} /></button>
-            )}
-            <button onClick={() => download(d)}
-              className="p-1.5 text-gray-400 hover:text-gray-700" title="Télécharger" data-testid={`doc-download-${d.id}`}><Download size={14} /></button>
-            <button onClick={() => del(d.id)} className="p-1.5 text-gray-300 hover:text-red-500" data-testid={`doc-del-${d.id}`}><Trash2 size={13} /></button>
-          </div>
-        </div>
-      ))}
-
-      {preview && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/60" onClick={() => setPreview(null)} />
-          <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden" data-testid="doc-preview-modal">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 shrink-0">
-              <div className="min-w-0">
-                <div className="text-xs font-semibold text-gray-900 truncate">{preview.filename}</div>
-                <div className="text-[10px] text-gray-400">{preview.category} · {fmtSize(preview.size)}</div>
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <button onClick={() => download(preview)} className="p-2 text-gray-400 hover:text-gray-700" title="Télécharger" data-testid="doc-preview-download"><Download size={15} /></button>
-                <button onClick={() => setPreview(null)} className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg" data-testid="doc-preview-close"><X size={16} /></button>
-              </div>
-            </div>
-            <div className="flex-1 bg-gray-100 overflow-auto flex items-center justify-center">
-              <AuthedFile url={fileUrl(preview, true)} render={(src) => !src
-                ? <Loader2 size={22} className="animate-spin text-gray-400" />
-                : isImage(preview)
-                  ? <img src={src} alt={preview.filename} className="max-w-full max-h-full object-contain" />
-                  : <iframe title={preview.filename} src={src} className="w-full h-full border-0" />} />
-            </div>
-            {isPdf(preview) && (
-              <div className="px-4 py-2 border-t border-gray-100 text-[10px] text-gray-400 shrink-0">
-                Si l'aperçu PDF ne s'affiche pas dans votre navigateur, utilisez le bouton de téléchargement ci-dessus.
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
 // ─── Fiche véhicule (drawer) ───
-const VehicleSheet = ({ vehicle, record, garageVehicle, unlinkedGarage, groupName, capability, deadlines = {}, onClose, onSaved, onGarageSaved, onLinkChanged }) => {
+const VehicleSheet = ({ vehicle, record, garageVehicle, unlinkedGarage, groupName, capability, deadlines = {}, onDeadlinesChanged, onClose, onSaved, onGarageSaved, onLinkChanged }) => {
   const [tab, setTab] = useState("general");
   const [photoUploading, setPhotoUploading] = useState(false);
   const [linkChoice, setLinkChoice] = useState("");
@@ -682,8 +553,8 @@ const VehicleSheet = ({ vehicle, record, garageVehicle, unlinkedGarage, groupNam
             ]} />
         )}
         {tab === "etat" && <EtatTab tid={tid} record={record} refresh={refresh} />}
-        {tab === "controles" && <ControlesTab tid={tid} record={record} refresh={refresh} />}
-        {tab === "documents" && <DocumentsTab tid={tid} record={record} refresh={refresh} />}
+        {tab === "controles" && <ControlesTab tid={tid} record={record} refresh={refresh} deadlines={deadlines} />}
+        {tab === "documents" && <DocumentsV2Tab tid={tid} onDeadlinesChanged={onDeadlinesChanged} />}
       </div>
     </div>
   );
@@ -714,6 +585,7 @@ export const VehiclesTab = ({ data, initialSelected, onConsumedInitial }) => {
         (r.data.deadlines || []).forEach(it => {
           const key = `${it.tracker_id}:${it.deadline_type}`;
           if (!m[key] || it.days_remaining < m[key].days_remaining) m[key] = it;
+          if (it.deadline_type === "controle" && it.source_id) m[`${it.tracker_id}:controle:${it.source_id}`] = it;
         });
         setDlMap(m);
       }
@@ -885,6 +757,7 @@ export const VehiclesTab = ({ data, initialSelected, onConsumedInitial }) => {
               groupName={groupTitle[groupIdByTid[selected]]}
               capability={caps[String(selected)] || null}
               deadlines={dlMap}
+              onDeadlinesChanged={fetchDeadlines}
               onClose={() => setSelected(null)} onSaved={onSaved} onGarageSaved={onGarageSaved}
               onLinkChanged={() => { fetchGarage(); fetchDeadlines(); }} />
           </>

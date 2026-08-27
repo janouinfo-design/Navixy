@@ -32,6 +32,7 @@ MODULE_PATH_MAP = (
     ("/api/reports/driver", "conducteurs"),
     ("/api/vehicles/admin", "vehicules"),
     ("/api/vehicles/", "vehicules"),
+    ("/api/documents", "vehicules"),
     ("/api/config/fuel", "carburant"),
     ("/api/export/", "rapports"),
 )

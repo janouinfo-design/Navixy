@@ -1,0 +1,40 @@
+{
+  "summary": "Frontend-only E2E test of the unified deadline engine (GET /api/vehicles/deadlines) consumption: demo-ev login, OverviewTab (KPI L1, panel Maintenance & conformité, Priorités du jour, drawers), VehiclesTab badges (leasing/assurance/controle), vehicle sheet badge consistency, live refetch after edit, super-admin impersonation of tenant flex (empty state), and PDF export. 8/9 requested scenarios PASS. One scenario (edit 'Assurance — détails internes' → Fin date) could NOT be executed as specified: the internal 'Fin' (date_fin) field is hidden by the UI when a garage vehicle is linked, and the alternative garage RC field save returns HTTP 404 on demo-ev (simulator does not implement vehicle/read|update) with an UNHANDLED promise rejection and no user-visible error. Live refetch was validated instead via the Leasing date_fin field (works perfectly, both sheet + list badges update without reload; value restored to empty).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PUT /api/vehicles/admin/navixy-garage/{vehicle_id}", "issue": "Returns 404 'Véhicule garage introuvable' on tenant demo-ev: demo_simulator.simulate() does not implement 'vehicle/read' / 'vehicle/update' endpoints, so any garage edit (identity, plate, VIN, RC insurance liability_insurance_valid_till, link/unlink, photo) is impossible in the demo tenant while the read-only garage list (vehicle/list) works. Blocks demoing/validating the C1 path (garage RC) through the UI."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "VehiclesTab / EditableSection.save", "issue": "save() awaits onSave() without try/catch → an API failure (e.g. garage PUT 404) produces an uncaught promise rejection (CRA red 'Uncaught runtime errors' overlay in preview), the section stays stuck in edit mode, the spinner never clears and NO error message is shown to the user. Applies to every EditableSection (garage identity, garage RC, leasing, assurance, carte grise) on all tenants.", "selector": "[data-testid='section-garage-assurance-save'], [data-testid='section-leasing-save']", "priority": "HIGH"},
+      {"component": "VehicleSheet › Assurance tab", "issue": "When a garage vehicle is linked (case of ALL demo-ev vehicles), the fields 'N° de police' and 'Fin' (assurance.date_fin) are removed from 'Assurance — détails internes'. Yet the deadline engine still uses assurance.date_fin as fallback (Zoe 900002: source=VEHICLE_LEGACY, due_date 2026-08-08 → red badge 'Échu depuis 19 j'). Consequence: the date that drives the red badge is neither displayed nor editable anywhere in the UI — user cannot fix/see the expired insurance date. Recommended: always show date_fin read-only (or editable, marked 'saisie interne — ignorée si RC garage renseignée').", "selector": "[data-testid='section-assurance']", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "VehicleSheet — all date fields in edit mode", "issues": ["Native browser date picker used (input type=date, mm/dd/yyyy placeholder) instead of the shadcn Calendar component; locale inconsistent with the read display format (DD/MM/YYYY) → risk of day/month confusion."]},
+      {"screen": "Login / initial load", "issues": ["Two harmless 401 console errors on every load (GET /api/auth/me before login). Cosmetic only, but pollutes the console for real error detection."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Wrap EditableSection.save in try/catch and surface a visible error (toast / inline message) + keep the form values; currently a failed save is silent and crashes as an unhandled rejection.",
+    "Implement 'vehicle/read' and 'vehicle/update' in backend/demo_simulator.py (in-memory garage state) so garage edits — including liability_insurance_valid_till, i.e. the C1 path — are demoable on demo-ev instead of returning 404.",
+    "Stop hiding assurance.date_fin (and police_no) when a garage vehicle is linked — the engine still uses it as fallback, so it must remain visible/editable (read-only display at minimum) to avoid an unfixable red badge.",
+    "Optional: replace native date inputs with the shadcn calendar and/or force fr-CH locale for consistency."
+  ],
+  "critical_code_review_comments": [
+    "VehiclesTab.jsx L472-475 saveGarage: no error handling; res.data.success checked but network/HTTP errors propagate as unhandled rejections up through EditableSection.save (L165-171).",
+    "VehiclesTab.jsx L653-668: conditional field list `...(gv ? [] : [police_no, date_fin])` contradicts deadline_engine fallback logic (garage RC → else assurance.date_fin). Engine and form must agree on which field is authoritative.",
+    "VehiclesTab.jsx (890 lines) and OverviewTab.jsx (845 lines) both exceed the 700-line guideline — split Badge/EditableSection/VehicleSheet and Drawer/Panel helpers into separate modules."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (per request)", "frontend": "89% (8/9 scenarios)"},
+  "seed_data_creation": "No new data. Temporary edits on demo-ev only: Zoe (900002) leasing.date_fin set to 2026-09-06 then cleared back to empty (verified '—' in sheet + list and absent from /api/vehicles/deadlines). Attempted garage RC edit failed with 404 → nothing persisted. Zoe assurance.date_fin untouched (actual seeded value is 2026-08-08, NOT 2026-08-14 as stated in the request; verified unchanged after tests).",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "demo@logitrak.ch / DemoEV2026! (demo-ev, prefilled via [data-testid=demo-admin-btn]); admin@logitrak.ch / LT!u4qv8ibtN21iOHDz (super admin)",
+  "context_for_next_testing_agent": "Validated (2026-08-27): demo-ev overview KPI critical=2, panel-maintenance tiles = upcoming 2 / assurances 2 / controles 1 / overdue 3; drawers (priority-overdue, kpi-critical, maint-*-btn) open with correct items and close via kpi-drawer-close; drawer-vehicle-900002 opens the sheet. Vehicles badges: 900001 controle 'Échu depuis 2 j', 900002 assurance 'Échu depuis 19 j', 900003 leasing 'Dans 11 j', 900005 assurance 'Dans 6 j', others '—' — fully consistent with the overview and with assurance-badge in the sheet. Live refetch confirmed via leasing edit. Flex impersonation (sa-client-actions-flex → sa-apercu-flex): clean empty state 'Aucune échéance à moins de 30 jours...', 52 vehicles all '—' badges, no JS error. PDF export: 200 application/pdf, 83 KB. Note: the maintenance/expertise deadline types have no column in the vehicles table (XC60 900004 maintenance overdue is only visible in the overview) — confirm whether intended.",
+  "rca_of_the_issue": "Garage save 404: vehicle_admin.garage_update calls navixy.read_vehicle() which, for tenant demo-ev (navixy hash = 'SIMULATION'), is routed to demo_simulator.simulate() where only 'vehicle/list' is implemented → success=false → HTTPException(404). Frontend side, EditableSection.save() has no try/catch so the axios rejection escapes React's handler (uncaught runtime error overlay) and the UI gives no feedback. Reproduce: demo-ev → Véhicules → Renault Zoe → Assurance → 'Modifier' on 'Police RC — synchronisée avec le garage LOGITRAK' → set 'Valide jusqu'au' → Enregistrer."
+}

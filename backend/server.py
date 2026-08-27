@@ -16,6 +16,7 @@ import csv
 import uuid
 import asyncio
 from pathlib import Path
+from collections import Counter
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
@@ -25,6 +26,8 @@ from cache_manager import TenantCacheManager
 from analytics_engine import AnalyticsEngine
 from ecodriving import compute_driver_ecodriving
 from vehicle_admin import create_vehicle_admin_router
+from deadline_engine import (compute_vehicle_deadlines, compute_fleet_deadlines,
+                             ENGINE_VERSION as DEADLINE_ENGINE_VERSION, DUE_SOON_DAYS)
 from capabilities import create_capabilities_router
 from auth import (
     make_require_user, require_role, create_auth_router,
@@ -769,6 +772,87 @@ async def audit_compare(
         "raw_navixy_calls": raw_navixy.get_logs(),
     }
 
+# ============ MOTEUR D'ÉCHÉANCES UNIQUE (source pour Vue générale, fiche véhicule et PDF) ============
+
+@api_router.get("/vehicles/deadlines")
+async def get_vehicles_deadlines(request: Request):
+    """Échéances calculées par le moteur unique (deadline_engine) — aucun recalcul frontend."""
+    h, tenant = await get_tenant_context(request)
+    admin_docs = await db.vehicle_admin.find({"tenant": tenant}, {"_id": 0}).to_list(1000)
+    admin_map = {str(d["tracker_id"]): d for d in admin_docs}
+    vg = await navixy.get_vehicles(h)
+    garage_ok = bool(vg.get("success"))
+    garage_by_tid = {v["tracker_id"]: v for v in vg.get("list", []) if v.get("tracker_id")} if garage_ok else {}
+    return {"success": True,
+            "engine_version": DEADLINE_ENGINE_VERSION,
+            "thresholds": {"due_soon_days": DUE_SOON_DAYS},
+            "garage_available": garage_ok,
+            "computed_at": datetime.now(timezone.utc).isoformat(),
+            "deadlines": compute_fleet_deadlines(admin_map, garage_by_tid)}
+
+# ============ CONTRÔLE D'INTÉGRITÉ IDENTITÉ VÉHICULE (lecture seule, aucune fusion auto) ============
+
+@api_router.get("/vehicles/integrity")
+async def get_vehicles_integrity(request: Request):
+    """Rapport d'intégrité identité véhicule. Stratégie canonique :
+    navixy_vehicle_id = identité de référence quand présente ; tracker_id = relation
+    technique (réaffectable) ; VIN = attribut de vérification, jamais une clé."""
+    h, tenant = await get_tenant_context(request)
+    tk = await navixy.get_trackers(h)
+    trackers = tk.get("list", []) if tk.get("success") else []
+    vg = await navixy.get_vehicles(h)
+    garage = vg.get("list", []) if vg.get("success") else []
+    admin_docs = await db.vehicle_admin.find({"tenant": tenant}, {"_id": 0, "tracker_id": 1}).to_list(1000)
+    caps_doc = await db.vehicle_capabilities.find_one({"tenant": tenant}, {"_id": 0, "records": 1})
+
+    tracker_ids = {t["id"] for t in trackers}
+    linked = [v for v in garage if v.get("tracker_id")]
+    unlinked = [v for v in garage if not v.get("tracker_id")]
+    linked_tids = {v["tracker_id"] for v in linked}
+
+    link_counts = Counter(v["tracker_id"] for v in linked)
+    ambiguous = [{"tracker_id": tid,
+                  "vehicles": [{"vehicle_id": v["id"], "label": v.get("label")}
+                               for v in linked if v["tracker_id"] == tid]}
+                 for tid, n in link_counts.items() if n > 1]
+
+    plate_counts = Counter((v.get("reg_number") or "").strip().upper()
+                           for v in garage if (v.get("reg_number") or "").strip())
+    duplicate_plates = [{"reg_number": p,
+                         "vehicles": [{"vehicle_id": v["id"], "label": v.get("label"),
+                                       "tracker_id": v.get("tracker_id")}
+                                      for v in garage if (v.get("reg_number") or "").strip().upper() == p]}
+                        for p, n in plate_counts.items() if n > 1]
+
+    vin_conflicts = []
+    for tid_s, rec in ((caps_doc or {}).get("records") or {}).items():
+        vin = rec.get("vin")
+        if vin and vin.get("conflict"):
+            vin_conflicts.append({"tracker_id": int(tid_s), "garage": vin.get("garage"), "obd": vin.get("obd")})
+
+    return {"success": True, "tenant": tenant, "no_auto_merge": True,
+            "navixy_available": bool(tk.get("success")) and bool(vg.get("success")),
+            "identity_strategy": {
+                "canonical": "navixy_vehicle_id (garage) quand présent",
+                "tracker_id": "relation technique télématique — réaffectable, jamais l'identité métier",
+                "vin": "attribut de vérification (couverture incomplète) — pas une clé",
+            },
+            "trackers_total": len(trackers),
+            "garage_total": len(garage),
+            "garage_linked": len(linked),
+            "garage_unlinked": [{"vehicle_id": v["id"], "label": v.get("label"),
+                                 "reg_number": v.get("reg_number")} for v in unlinked],
+            "trackers_without_garage": [{"tracker_id": t["id"], "label": t.get("label")}
+                                        for t in trackers if t["id"] not in linked_tids],
+            "stale_garage_links": [{"vehicle_id": v["id"], "label": v.get("label"),
+                                    "tracker_id": v["tracker_id"]}
+                                   for v in linked if v["tracker_id"] not in tracker_ids],
+            "orphan_admin_records": [d["tracker_id"] for d in admin_docs
+                                     if d["tracker_id"] not in tracker_ids],
+            "ambiguous_tracker_links": ambiguous,
+            "duplicate_plates": duplicate_plates,
+            "vin_conflicts": vin_conflicts}
+
 # ============ PDF EXPORT ============
 
 @api_router.get("/export/pdf")
@@ -805,18 +889,15 @@ async def export_pdf(
     photo_bytes = dict(zip(photo_targets.keys(),
                            await asyncio.gather(*[_fetch_img(u) for u in photo_targets.values()])))
 
-    def _echeance(date_str):
-        if not date_str:
+    def _fmt_deadline(item):
+        """Présentation PDF d'un item du moteur d'échéances unique (aucun recalcul métier)."""
+        if not item:
             return ("—", None)
-        try:
-            d = datetime.strptime(str(date_str)[:10], "%Y-%m-%d").date()
-        except ValueError:
-            return ("—", None)
-        days = (d - datetime.now(timezone.utc).date()).days
-        dt = d.strftime("%d.%m.%Y")
-        if days < 0:
+        dt = datetime.strptime(item["due_date"], "%Y-%m-%d").strftime("%d.%m.%Y")
+        days = item["days_remaining"]
+        if item["status"] == "EXPIRED":
             return (f"{dt}\nEchu depuis {-days} j", "red")
-        if days < 30:
+        if item["status"] == "DUE_SOON":
             return (f"{dt}\nDans {days} j", "orange")
         return (f"{dt}\nDans {days} j", "green")
 
@@ -921,17 +1002,18 @@ async def export_pdf(
                  "green": rl_colors.Color(0.0, 0.55, 0.3)}
     for ridx, v in enumerate(stats.get('vehicles', []), start=1):
         tid = v['tracker_id']
-        rec = admin_map.get(tid, {})
-        gv = garage_map.get(tid, {})
-        leasing_txt, leasing_c = _echeance((rec.get('leasing') or {}).get('date_fin'))
-        assur_txt, assur_c = _echeance(gv.get('liability_insurance_valid_till')
-                                       or (rec.get('assurance') or {}).get('date_fin'))
-        open_ctrl = sorted([c for c in (rec.get('controles') or [])
-                            if c.get('due_date') and not c.get('done_date')],
-                           key=lambda c: c['due_date'])
-        ctrl_txt, ctrl_c = _echeance(open_ctrl[0]['due_date'] if open_ctrl else None)
-        if open_ctrl:
-            ctrl_txt = f"{open_ctrl[0].get('label', 'Controle')[:20]}\n{ctrl_txt.splitlines()[-1]}"
+        dl_items = compute_vehicle_deadlines(tid, admin_map.get(tid, {}), garage_map.get(tid))
+        by_type = {}
+        for it in dl_items:
+            cur = by_type.get(it["deadline_type"])
+            if cur is None or it["days_remaining"] < cur["days_remaining"]:
+                by_type[it["deadline_type"]] = it
+        leasing_txt, leasing_c = _fmt_deadline(by_type.get("leasing"))
+        assur_txt, assur_c = _fmt_deadline(by_type.get("assurance"))
+        ctrl = by_type.get("controle")
+        ctrl_txt, ctrl_c = _fmt_deadline(ctrl)
+        if ctrl:
+            ctrl_txt = f"{ctrl['label'].replace('Contrôle : ', '')[:20]}\n{ctrl_txt.splitlines()[-1]}"
         ech_rows.append([v['label'][:24], leasing_txt, assur_txt, ctrl_txt])
         for cidx, c in ((1, leasing_c), (2, assur_c), (3, ctrl_c)):
             if c:
@@ -950,7 +1032,7 @@ async def export_pdf(
         ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
     ] + ech_styles))
     elements.append(ech_t)
-    elements.append(Paragraph("Sources : leasing/controles = saisie LOGITRAK Dashboard; assurance = garage LOGITRAK (fallback saisie). Rouge = echu, orange < 30 j.", sub_style))
+    elements.append(Paragraph("Echeances calculees par le moteur unique LOGITRAK (assurance: garage LOGITRAK puis saisie interne; leasing/controles: saisie). Rouge = echu, orange < 30 j.", sub_style))
 
     # ---- Eco-conduite (notation native) ----
     if eco.get('success'):

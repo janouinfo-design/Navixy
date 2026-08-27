@@ -14,8 +14,8 @@ ROOT = f"{BASE_URL}/api/vehicles/admin"
 
 @pytest.fixture(scope="module")
 def client():
-    s = requests.Session()
-    return s
+    from conftest import super_admin_session
+    return super_admin_session()
 
 
 # ---------- LIST + SECTION UPSERT ----------

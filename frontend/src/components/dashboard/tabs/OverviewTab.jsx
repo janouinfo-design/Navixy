@@ -56,7 +56,6 @@ const OFFLINE_PROLONGED_HOURS = 48; // règle 2b : hors ligne prolongé = critiq
 const DAYS_FR = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
 const dayFR = (ds) => DAYS_FR[new Date(ds + "T00:00:00").getDay()];
 const fmtDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const daysTo = (ds) => ds ? Math.round((new Date(ds + "T00:00:00") - new Date().setHours(0, 0, 0, 0)) / 86400000) : null;
 
 // Période précédente de longueur identique, immédiatement avant fromDate
 const prevRange = (fromDate, toDate) => {
@@ -189,12 +188,12 @@ export const OverviewTab = ({ data, fromDate, toDate, onNavigate, onOpenVehicle 
   const [drawer, setDrawer] = useState(null);
   const open = (title, items, icon, tone) => setDrawer({ title, items, icon, tone });
 
-  // ---- Capabilities + fiches admin (mêmes sources que l'onglet Véhicules — cache backend 6 h) ----
+  // ---- Capabilities + échéances (moteur backend UNIQUE — mêmes statuts que fiche véhicule et PDF) ----
   const [caps, setCaps] = useState(null);
-  const [adminRecs, setAdminRecs] = useState({});
+  const [dl, setDl] = useState(null);
   useEffect(() => {
     api.get(`${API}/vehicles/capabilities`).then(r => setCaps(r.data.success ? r.data : { success: false })).catch(() => setCaps({ success: false }));
-    api.get(`${API}/vehicles/admin`).then(r => { if (r.data.success) setAdminRecs(r.data.records || {}); }).catch(() => {});
+    api.get(`${API}/vehicles/deadlines`).then(r => { if (r.data.success) setDl(r.data); }).catch(() => {});
   }, []);
 
   // ---- Éco-conduite (lazy — partage le cache backend avec l'onglet Conducteurs) ----
@@ -347,32 +346,26 @@ export const OverviewTab = ({ data, fromDate, toDate, onNavigate, onOpenVehicle 
     return { mix, fuelLow, battLow, telemetry, battItems, chargingItems, chargingCapCount, socs, kwhs, fuelEstVehicles, estLiters, estL100, evKnownNoTelemetry };
   }, [vehicles, capsRecs, threshold]);
 
-  // ═══ Maintenance & conformité — uniquement dates réelles des fiches vehicle_admin (décision 4a : docs manquants omis) ═══
+  // ═══ Maintenance & conformité — statuts du moteur d'échéances backend unique (C1 corrigé : assurance = garage puis saisie) ═══
   const maint = useMemo(() => {
-    const all = [];
-    for (const [tid, rec] of Object.entries(adminRecs)) {
-      const label = vehicles.find(v => String(v.tracker_id) === tid)?.label || `Véhicule ${tid}`;
-      const plate = plateOf(tid);
-      const push = (what, ds, kind, criticalWhenOverdue) => {
-        const d = daysTo(ds);
-        if (d === null || d > 30) return;
-        all.push({
-          tid: Number(tid), label, kind, criticalWhenOverdue, d, date: ds,
-          sub: `${plate ? plate + " · " : ""}${what} · ${ds}`, what,
+    const all = (dl?.deadlines || [])
+      .filter(x => x.days_remaining <= 30)
+      .map(x => {
+        const label = vehicles.find(v => v.tracker_id === x.tracker_id)?.label || `Véhicule ${x.tracker_id}`;
+        const plate = plateOf(x.tracker_id);
+        const d = x.days_remaining;
+        return {
+          tid: x.tracker_id, label, kind: x.deadline_type, criticalWhenOverdue: x.critical_when_overdue,
+          d, date: x.due_date, what: x.label, source: x.source,
+          sub: `${plate ? plate + " · " : ""}${x.label} · ${x.due_date}`,
           value: d < 0 ? `échu (${Math.abs(d)} j)` : d === 0 ? "aujourd'hui" : `J-${d}`,
           valueCls: d < 0 ? "text-red-600" : "text-amber-600",
-        });
-      };
-      push("Fin de leasing", rec.leasing?.date_fin, "leasing", false);
-      push("Fin d'assurance", rec.assurance?.date_fin, "assurance", true);
-      (rec.controles || []).filter(ct => ct.due_date && !ct.done_date).forEach(ct => push(`Contrôle : ${ct.label}`, ct.due_date, "controle", true));
-      push("Prochaine maintenance", rec.general?.prochaine_maintenance, "maintenance", false);
-      push("Prochaine expertise", rec.general?.prochaine_expertise, "expertise", false);
-    }
-    all.sort((a, b) => a.d - b.d);
+        };
+      })
+      .sort((a, b) => a.d - b.d);
     const overdue = all.filter(x => x.d < 0);
     const upcoming = all.filter(x => x.d >= 0);
-    // Règle 2b : CRITIQUE = assurance/contrôle DÉJÀ échu uniquement
+    // Règle 2b (appliquée par le moteur) : CRITIQUE = assurance/contrôle DÉJÀ échu uniquement
     const overdueCritical = overdue.filter(x => x.criticalWhenOverdue);
     const overdueWatch = overdue.filter(x => !x.criticalWhenOverdue);
     const assurances = all.filter(x => x.kind === "assurance");
@@ -384,7 +377,7 @@ export const OverviewTab = ({ data, fromDate, toDate, onNavigate, onOpenVehicle 
       controles: all.filter(x => x.kind === "controle" && x.d >= -7 && x.d <= 23).length,
     };
     return { all, overdue, upcoming, overdueCritical, overdueWatch, assurances, controles, prev };
-  }, [adminRecs, vehicles, capsRecs]);
+  }, [dl, vehicles, capsRecs]);
 
   // ═══ Alertes critiques (règle 2b) — assurance/contrôle échu + hors ligne prolongé/jamais connecté ═══
   const critical = useMemo(() => {

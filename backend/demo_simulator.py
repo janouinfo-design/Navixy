@@ -175,6 +175,19 @@ def _history(tid: int, sensor_id: int, from_s: str, to_s: str):
     return {"success": True, "list": pts}
 
 
+# Overrides garage démo (vehicle/update simulé) — en mémoire process, tenant SIMULATION uniquement
+_GARAGE_OVERRIDES = {}
+
+
+def _garage_vehicle(v: dict) -> dict:
+    base = {"id": v["tid"] + 5000, "tracker_id": v["tid"], "label": v["label"], "model": v["model"],
+            "reg_number": v["plate"], "fuel_type": v["fuel"], "manufacture_year": 2024,
+            "vin": f"SIMVIN{v['tid']}00000000"[:17], "type": "vehicle"}
+    base.update(_GARAGE_OVERRIDES.get(base["id"], {}))
+    base["id"] = v["tid"] + 5000
+    return base
+
+
 def simulate(endpoint: str, params: dict) -> dict:
     now = _now()
     if endpoint == "tracker/list":
@@ -182,10 +195,20 @@ def simulate(endpoint: str, params: dict) -> dict:
             {"id": v["tid"], "label": v["label"], "group_id": 0,
              "source": {"model": "simulator", "device_id": f"SIM{v['tid']}"}} for v in VEHICLES]}
     if endpoint == "vehicle/list":
-        return {"success": True, "list": [
-            {"id": v["tid"] + 5000, "tracker_id": v["tid"], "label": v["label"], "model": v["model"],
-             "reg_number": v["plate"], "fuel_type": v["fuel"], "manufacture_year": 2024,
-             "vin": f"SIMVIN{v['tid']}00000000"[:17], "type": "vehicle"} for v in VEHICLES]}
+        return {"success": True, "list": [_garage_vehicle(v) for v in VEHICLES]}
+    if endpoint == "vehicle/read":
+        vid = params.get("vehicle_id")
+        v = next((x for x in VEHICLES if x["tid"] + 5000 == vid), None)
+        if v is None:
+            return {"success": False, "status": {"code": 204, "description": "not found"}}
+        return {"success": True, "value": _garage_vehicle(v)}
+    if endpoint == "vehicle/update":
+        veh = params.get("vehicle") or {}
+        vid = veh.get("id")
+        if not any(x["tid"] + 5000 == vid for x in VEHICLES):
+            return {"success": False, "status": {"code": 204, "description": "not found"}}
+        _GARAGE_OVERRIDES[vid] = {k: val for k, val in veh.items() if k != "id"}
+        return {"success": True}
     if endpoint == "tracker/get_state":
         tid = params.get("tracker_id")
         if tid not in _BY_TID:

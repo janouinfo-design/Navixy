@@ -10,9 +10,8 @@ TIMEOUT = 90
 
 @pytest.fixture(scope="module")
 def api():
-    s = requests.Session()
-    s.headers.update({"Content-Type": "application/json"})
-    return s
+    from conftest import super_admin_session
+    return super_admin_session()
 
 
 def _get_eff(api, from_d, to_d):

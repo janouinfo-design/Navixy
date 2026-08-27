@@ -12,6 +12,7 @@ import SuperAdminDashboard from "@/components/superadmin/SuperAdminDashboard";
 import ClientsPage from "@/components/superadmin/ClientsPage";
 import ClientDetail from "@/components/superadmin/ClientDetail";
 import { API, api } from "@/lib/api";
+import { Toaster } from "@/components/ui/sonner";
 
 const Spinner = () => (
   <div className="h-screen flex items-center justify-center bg-[#F7F7F8]">
@@ -85,6 +86,7 @@ function App() {
           </Route>
           <Route path="/*" element={<DashboardGate />} />
         </Routes>
+        <Toaster position="top-right" richColors />
       </AuthProvider>
     </BrowserRouter>
   );

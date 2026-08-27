@@ -1,26 +1,25 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { API, api } from "@/lib/api";
+import { toast } from "sonner";
 import {
   Search, ChevronRight, X, Pencil, Check, Plus, Trash2,
   FileText, Download, Upload, Hash, Gauge, Radio, ShieldCheck,
   CreditCard, ClipboardList, FolderOpen, Car, Loader2, Camera, RefreshCw, PlugZap, Plug, Battery, Eye
 } from "lucide-react";
 
-// ─── Échéances : rouge = échu, orange < 30 j, vert sinon ───
-const deadlineBadge = (dateStr) => {
-  if (!dateStr) return { label: "—", cls: "bg-gray-50 text-gray-400 border-gray-200", days: null };
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const d = new Date(dateStr + "T00:00:00");
-  const days = Math.round((d - today) / 86400000);
-  if (days < 0) return { label: `Échu depuis ${-days} j`, cls: "bg-red-50 text-red-600 border-red-200", days };
-  if (days < 30) return { label: `Dans ${days} j`, cls: "bg-amber-50 text-amber-700 border-amber-200", days };
-  return { label: `Dans ${days} j`, cls: "bg-emerald-50 text-emerald-700 border-emerald-200", days };
+// ─── Échéances : statuts fournis par le moteur backend unique — aucun recalcul frontend ───
+const dlPresentation = (item) => {
+  if (!item) return { label: "—", cls: "bg-gray-50 text-gray-400 border-gray-200", dot: null };
+  const days = item.days_remaining;
+  if (item.status === "EXPIRED") return { label: `Échu depuis ${-days} j`, cls: "bg-red-50 text-red-600 border-red-200", dot: "bg-red-500" };
+  if (item.status === "DUE_SOON") return { label: `Dans ${days} j`, cls: "bg-amber-50 text-amber-700 border-amber-200", dot: "bg-amber-500" };
+  return { label: `Dans ${days} j`, cls: "bg-emerald-50 text-emerald-700 border-emerald-200", dot: "bg-emerald-500" };
 };
 
-const Badge = ({ date, testId }) => {
-  const b = deadlineBadge(date);
+const Badge = ({ item, testId }) => {
+  const b = dlPresentation(item);
   return <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full border text-[10px] font-medium whitespace-nowrap ${b.cls}`} data-testid={testId}>
-    {b.days !== null && <span className={`w-1.5 h-1.5 rounded-full ${b.days < 0 ? "bg-red-500" : b.days < 30 ? "bg-amber-500" : "bg-emerald-500"}`} />}{b.label}
+    {b.dot && <span className={`w-1.5 h-1.5 rounded-full ${b.dot}`} />}{b.label}
   </span>;
 };
 
@@ -159,12 +158,6 @@ const CapabilitiesPanel = ({ cap }) => {
   );
 };
 
-// Contrôle le plus proche non effectué
-const nextControle = (controles) => {
-  const open = (controles || []).filter(c => c.due_date && !c.done_date).sort((a, b) => a.due_date.localeCompare(b.due_date));
-  return open[0]?.due_date || null;
-};
-
 // ─── Section éditable générique ───
 const EditableSection = ({ title, subtitle, fields, values, readonlyFields = [], onSave, testId }) => {
   const [editing, setEditing] = useState(false);
@@ -174,9 +167,15 @@ const EditableSection = ({ title, subtitle, fields, values, readonlyFields = [],
   const startEdit = () => { setForm({ ...values }); setEditing(true); };
   const save = async () => {
     setSaving(true);
-    await onSave(form);
-    setSaving(false);
-    setEditing(false);
+    try {
+      await onSave(form);
+      setEditing(false);
+    } catch (e) {
+      const detail = e?.response?.data?.detail;
+      toast.error(typeof detail === "string" ? detail : "Échec de l'enregistrement — vérifiez les valeurs et réessayez");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -455,7 +454,7 @@ const DocumentsTab = ({ tid, record, refresh }) => {
 };
 
 // ─── Fiche véhicule (drawer) ───
-const VehicleSheet = ({ vehicle, record, garageVehicle, unlinkedGarage, groupName, capability, onClose, onSaved, onGarageSaved, onLinkChanged }) => {
+const VehicleSheet = ({ vehicle, record, garageVehicle, unlinkedGarage, groupName, capability, deadlines = {}, onClose, onSaved, onGarageSaved, onLinkChanged }) => {
   const [tab, setTab] = useState("general");
   const [photoUploading, setPhotoUploading] = useState(false);
   const [linkChoice, setLinkChoice] = useState("");
@@ -633,7 +632,7 @@ const VehicleSheet = ({ vehicle, record, garageVehicle, unlinkedGarage, groupNam
         )}
         {tab === "leasing" && (
           <div className="space-y-3">
-            <div className="flex items-center gap-2"><span className="text-[10px] text-gray-400 uppercase font-semibold">Échéance :</span><Badge date={(record.leasing || {}).date_fin} testId="leasing-badge" /></div>
+            <div className="flex items-center gap-2"><span className="text-[10px] text-gray-400 uppercase font-semibold">Échéance :</span><Badge item={deadlines[`${tid}:leasing`]} testId="leasing-badge" /></div>
             <EditableSection title="Contrat de leasing" testId="section-leasing"
               values={record.leasing || {}} onSave={(data) => saveSection("leasing", data)}
               fields={[
@@ -649,7 +648,7 @@ const VehicleSheet = ({ vehicle, record, garageVehicle, unlinkedGarage, groupNam
         )}
         {tab === "assurance" && (
           <div className="space-y-3">
-            <div className="flex items-center gap-2"><span className="text-[10px] text-gray-400 uppercase font-semibold">Échéance :</span><Badge date={gv?.liability_insurance_valid_till || (record.assurance || {}).date_fin} testId="assurance-badge" /></div>
+            <div className="flex items-center gap-2"><span className="text-[10px] text-gray-400 uppercase font-semibold">Échéance :</span><Badge item={deadlines[`${tid}:assurance`]} testId="assurance-badge" /></div>
             {gv && (
               <EditableSection title="Police RC — synchronisée avec le garage LOGITRAK" subtitle="N° de police et validité propagés dans les 2 sens" testId="section-garage-assurance"
                 values={gv} onSave={saveGarage}
@@ -662,10 +661,8 @@ const VehicleSheet = ({ vehicle, record, garageVehicle, unlinkedGarage, groupNam
               values={record.assurance || {}} onSave={(data) => saveSection("assurance", data)}
               fields={[
                 { key: "compagnie", label: "Compagnie" },
-                ...(gv ? [] : [
-                  { key: "police_no", label: "N° de police" },
-                  { key: "date_fin", label: "Fin", type: "date" },
-                ]),
+                { key: "police_no", label: gv ? "N° de police (saisie interne)" : "N° de police" },
+                { key: "date_fin", label: gv ? "Fin (interne — utilisée seulement si la RC garage est vide)" : "Fin", type: "date" },
                 { key: "date_debut", label: "Début", type: "date" },
                 { key: "couverture", label: "Type de couverture" },
                 { key: "franchise", label: "Franchise (CHF)", type: "number" },
@@ -707,6 +704,21 @@ export const VehiclesTab = ({ data, initialSelected, onConsumedInitial }) => {
   const [garage, setGarage] = useState({ linked: {}, unlinked: [], ok: false });
   const [syncing, setSyncing] = useState(false);
   const [caps, setCaps] = useState({});
+  const [dlMap, setDlMap] = useState({});
+
+  const fetchDeadlines = useCallback(async () => {
+    try {
+      const r = await api.get(`${API}/vehicles/deadlines`);
+      if (r.data.success) {
+        const m = {};
+        (r.data.deadlines || []).forEach(it => {
+          const key = `${it.tracker_id}:${it.deadline_type}`;
+          if (!m[key] || it.days_remaining < m[key].days_remaining) m[key] = it;
+        });
+        setDlMap(m);
+      }
+    } catch { /* moteur indisponible → badges "—" (aucun recalcul local) */ }
+  }, []);
 
   const fetchGarage = useCallback(async () => {
     setSyncing(true);
@@ -732,15 +744,18 @@ export const VehiclesTab = ({ data, initialSelected, onConsumedInitial }) => {
     api.get(`${API}/groups`).then(res => { if (res.data.success) setGroups(res.data.groups || []); }).catch(() => {});
     api.get(`${API}/vehicles/capabilities`).then(res => { if (res.data.success) setCaps(res.data.records || {}); }).catch(() => {});
     fetchGarage();
-  }, [fetchGarage]);
+    fetchDeadlines();
+  }, [fetchGarage, fetchDeadlines]);
 
   const onSaved = useCallback((tid, record) => {
     setRecords(prev => ({ ...prev, [String(tid)]: record }));
-  }, []);
+    fetchDeadlines();
+  }, [fetchDeadlines]);
 
   const onGarageSaved = useCallback((tid, vehicle) => {
     setGarage(prev => ({ ...prev, linked: { ...prev.linked, [String(tid)]: vehicle } }));
-  }, []);
+    fetchDeadlines();
+  }, [fetchDeadlines]);
 
   const rows = useMemo(() => {
     return vehicles
@@ -839,9 +854,9 @@ export const VehiclesTab = ({ data, initialSelected, onConsumedInitial }) => {
                   <td className="px-4 py-3 text-xs text-gray-600 tabular-nums">{fmtKm(v.total_odometer)}</td>
                   <td className="px-4 py-3 text-xs"><FuelLevel cap={caps[String(v.tracker_id)]} testId={`fuel-level-${v.tracker_id}`} /></td>
                   <td className="px-4 py-3 text-xs text-gray-600">{g.responsable || <span className="text-gray-300">—</span>}</td>
-                  <td className="px-4 py-3"><Badge date={(v.rec.leasing || {}).date_fin} testId={`badge-leasing-${v.tracker_id}`} /></td>
-                  <td className="px-4 py-3"><Badge date={gv?.liability_insurance_valid_till || (v.rec.assurance || {}).date_fin} testId={`badge-assurance-${v.tracker_id}`} /></td>
-                  <td className="px-4 py-3"><Badge date={nextControle(v.rec.controles)} testId={`badge-controle-${v.tracker_id}`} /></td>
+                  <td className="px-4 py-3"><Badge item={dlMap[`${v.tracker_id}:leasing`]} testId={`badge-leasing-${v.tracker_id}`} /></td>
+                  <td className="px-4 py-3"><Badge item={dlMap[`${v.tracker_id}:assurance`]} testId={`badge-assurance-${v.tracker_id}`} /></td>
+                  <td className="px-4 py-3"><Badge item={dlMap[`${v.tracker_id}:controle`]} testId={`badge-controle-${v.tracker_id}`} /></td>
                   <td className="px-2 py-3"><ChevronRight size={14} className="text-gray-300" /></td>
                 </tr>
               );
@@ -855,7 +870,7 @@ export const VehiclesTab = ({ data, initialSelected, onConsumedInitial }) => {
 
       <div className="flex items-center gap-2 px-4 py-2 bg-gray-50 rounded-xl border border-gray-200">
         <span className="w-2 h-2 rounded-full bg-emerald-500" />
-        <span className="text-[10px] text-gray-500">Kilométrage et tracker = données GPS réelles. Identité véhicule, plaque, VIN, assurance RC et photo = garage LOGITRAK, synchronisés dans les 2 sens à chaque chargement. Leasing, contrôles, état des lieux, documents = saisie LOGITRAK Dashboard. Échéances : rouge = échu · orange &lt; 30 j · vert sinon.</span>
+        <span className="text-[10px] text-gray-500">Kilométrage et tracker = données GPS réelles. Identité véhicule, plaque, VIN, assurance RC et photo = garage LOGITRAK, synchronisés dans les 2 sens à chaque chargement. Leasing, contrôles, état des lieux, documents = saisie LOGITRAK Dashboard. Échéances : statuts calculés par le moteur backend unique (assurance = garage puis saisie interne) — rouge = échu · orange &lt; 30 j · vert sinon.</span>
       </div>
 
       {selected && (() => {
@@ -869,8 +884,9 @@ export const VehiclesTab = ({ data, initialSelected, onConsumedInitial }) => {
               unlinkedGarage={garage.unlinked}
               groupName={groupTitle[groupIdByTid[selected]]}
               capability={caps[String(selected)] || null}
+              deadlines={dlMap}
               onClose={() => setSelected(null)} onSaved={onSaved} onGarageSaved={onGarageSaved}
-              onLinkChanged={fetchGarage} />
+              onLinkChanged={() => { fetchGarage(); fetchDeadlines(); }} />
           </>
         );
       })()}
